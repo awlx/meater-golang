@@ -16,8 +16,10 @@ import (
 // rateWindow is how far back the cooking-rate regression looks.
 const rateWindow = 3 * time.Minute
 
-// historyLimit caps the number of retained samples.
-const historyLimit = 4096
+// historyLimit caps the number of retained samples. It is large enough to hold
+// the full span of even a very long cook (a multi-day smoke at one sample every
+// few seconds) so the live chart never drops the early part of the curve.
+const historyLimit = 200000
 
 // defaultIdleTimeout is how long without a reading marks the current cook as
 // finished.

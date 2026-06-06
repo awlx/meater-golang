@@ -16,9 +16,6 @@ const PRESETS = [
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 86; // matches the SVG radius
 
-// How much history to keep on the chart (milliseconds).
-const CHART_WINDOW_MS = 60 * 60 * 1000;
-
 // Default ambient alert thresholds in Celsius, plus the "almost done" timer.
 const DEFAULT_ALERT = { low: 110, high: 125, enabled: false, etaEnabled: true, etaMinutes: 30 };
 
@@ -220,24 +217,61 @@ function toggleUnit() {
 
 // ---- Chart -------------------------------------------------------------
 
+// Chart points are averaged into fixed time buckets so a long cook stays light
+// to draw and hover over, no matter how fast the probe reports. The raw samples
+// are still kept at full resolution in the database.
+const BUCKET_MS = 5 * 60 * 1000; // 5 minutes
+
+// addSample folds one reading into a 5-minute bucket, updating the running
+// average for the current bucket or starting a new one.
+function addSample(series, t, tip, amb) {
+	if (tip === null || tip === undefined || Number.isNaN(tip)) return;
+	const bucket = Math.floor(t / BUCKET_MS);
+	const last = series[series.length - 1];
+	if (last && bucket === last.bucket) {
+		if (t < last.lastT) return; // out of order within the bucket
+		last.n += 1;
+		last.sumTip += tip;
+		last.sumAmb += amb;
+		last.tip = last.sumTip / last.n;
+		last.amb = last.sumAmb / last.n;
+		last.lastT = t;
+		return;
+	}
+	if (last && bucket < last.bucket) return; // out of order across buckets
+	series.push({
+		bucket,
+		n: 1,
+		sumTip: tip,
+		sumAmb: amb,
+		t: bucket * BUCKET_MS + BUCKET_MS / 2, // plot at the bucket centre
+		tip,
+		amb,
+		lastT: t,
+	});
+}
+
+// bucketize averages a list of raw {t, tip, amb} points into 5-minute buckets.
+function bucketize(raw) {
+	const out = [];
+	for (const p of raw) addSample(out, p.t, p.tip, p.amb);
+	return out;
+}
+
 function pushPoint(status) {
 	const t = status.updatedAt ? new Date(status.updatedAt).getTime() : Date.now();
-	const last = state.series[state.series.length - 1];
-	if (last && t <= last.t) return; // ignore duplicates / out-of-order
-	state.series.push({ t, tip: status.tipCelsius, amb: status.ambientCelsius });
-	const cutoff = Date.now() - CHART_WINDOW_MS;
-	while (state.series.length && state.series[0].t < cutoff) state.series.shift();
+	addSample(state.series, t, status.tipCelsius, status.ambientCelsius);
 }
 
 async function loadHistory() {
 	try {
 		const res = await fetch('/api/history');
 		const points = await res.json();
-		state.series = (points || []).map((p) => ({
+		state.series = bucketize((points || []).map((p) => ({
 			t: new Date(p.at).getTime(),
 			tip: p.tipCelsius,
 			amb: p.ambientCelsius,
-		}));
+		})));
 		drawChart();
 	} catch (err) {
 		console.error('history load failed', err);
@@ -556,11 +590,11 @@ async function viewCook(id, name, targetCelsius) {
 	try {
 		const res = await fetch('/api/cooks/' + id);
 		const data = await res.json();
-		state.viewSeries = (data.points || []).map((p) => ({
+		state.viewSeries = bucketize((data.points || []).map((p) => ({
 			t: new Date(p.at).getTime(),
 			tip: p.tipCelsius,
 			amb: p.ambientCelsius,
-		}));
+		})));
 		state.viewingCookId = id;
 		state.viewMeta = { name, target: typeof targetCelsius === 'number' ? targetCelsius : null };
 		updateLiveButton();
