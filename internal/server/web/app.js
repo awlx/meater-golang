@@ -65,6 +65,13 @@ function fmtTemp(v) {
 	return Math.round(v * 10) / 10;
 }
 
+// fmtRate keeps two decimals so slow cooking rates (e.g. a stall at
+// ~0.04 °/min) stay visible instead of rounding to zero.
+function fmtRate(v) {
+	if (v === null || v === undefined || Number.isNaN(v)) return '--';
+	return (Math.round(v * 100) / 100).toFixed(2);
+}
+
 function fmtDuration(seconds) {
 	if (seconds < 0) return '--:--';
 	seconds = Math.max(0, Math.round(seconds));
@@ -132,7 +139,7 @@ function render(status) {
 		? status.rateCelsiusPerMin
 		: status.rateCelsiusPerMin * 9 / 5;
 	el('rate').innerHTML = status.hasReading
-		? `${rate > 0 ? '+' : ''}${fmtTemp(rate)} <span class="unit">°/min</span>`
+		? `${rate > 0 ? '+' : ''}${fmtRate(rate)} <span class="unit">°/min</span>`
 		: `-- <span class="unit">°/min</span>`;
 
 	// Ring progress (fraction of target reached).

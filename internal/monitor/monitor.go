@@ -371,7 +371,7 @@ func (m *Monitor) statusLocked() Status {
 	s.AmbientFahrenheit = round1(m.latest.AmbientFahrenheit())
 
 	ratePerSec, ok := m.rateLocked()
-	s.RateCelsiusPerMin = round1(ratePerSec * 60)
+	s.RateCelsiusPerMin = round2(ratePerSec * 60)
 
 	switch {
 	case tip >= m.target:
@@ -422,6 +422,10 @@ func (m *Monitor) rateLocked() (perSec float64, ok bool) {
 
 func round1(v float64) float64 {
 	return float64(int(v*10+sign(v)*0.5)) / 10
+}
+
+func round2(v float64) float64 {
+	return float64(int(v*100+sign(v)*0.5)) / 100
 }
 
 func sign(v float64) float64 {
