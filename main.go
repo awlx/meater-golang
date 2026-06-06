@@ -19,6 +19,7 @@ import (
 	"github.com/awlx/meater-golang/internal/meater"
 	"github.com/awlx/meater-golang/internal/monitor"
 	"github.com/awlx/meater-golang/internal/server"
+	"github.com/awlx/meater-golang/internal/store"
 	"golang.org/x/crypto/acme/autocert"
 	"tinygo.org/x/bluetooth"
 )
@@ -52,6 +53,10 @@ var (
 		"default target tip temperature in Celsius")
 	mock = flag.Bool("mock", false,
 		"simulate a probe instead of using Bluetooth (for UI testing)")
+	dbPath = flag.String("db", "meater.db",
+		"path to the SQLite database for cook history (empty disables persistence)")
+	cookIdle = flag.Duration("cook-idle", 5*time.Minute,
+		"finish the current cook after this long without a reading")
 )
 
 func main() {
@@ -59,7 +64,26 @@ func main() {
 	flag.Parse()
 
 	mon := monitor.New(*targetTemp)
-	srv := server.New(mon)
+
+	var st *store.Store
+	if *dbPath != "" {
+		var err error
+		st, err = store.Open(*dbPath)
+		if err != nil {
+			log.Printf("persistence disabled: open database %q: %v", *dbPath, err)
+			st = nil
+		} else {
+			defer st.Close()
+			mon.SetStore(st, *cookIdle)
+			resumeCook(mon, st, *cookIdle)
+			if err := st.Prune(); err != nil {
+				log.Printf("prune cooks: %v", err)
+			}
+			go mon.RunJanitor()
+		}
+	}
+
+	srv := server.New(mon, st)
 
 	go startServer(srv.Handler())
 
@@ -72,6 +96,42 @@ func main() {
 
 	waitForSignal()
 	log.Println("shutting down")
+}
+
+// resumeCook restores an in-progress cook on startup. If the open cook has been
+// idle longer than idleTimeout it is finished instead of resumed so an old
+// session is not merged with a new one.
+func resumeCook(mon *monitor.Monitor, st *store.Store, idleTimeout time.Duration) {
+	cook, err := st.CurrentOpenCook()
+	if err != nil {
+		log.Printf("resume cook: %v", err)
+		return
+	}
+	if cook == nil {
+		return
+	}
+	last, ok, err := st.LastSampleAt(cook.ID)
+	if err != nil {
+		log.Printf("resume cook: %v", err)
+		return
+	}
+	if ok && time.Since(last) > idleTimeout {
+		if err := st.EndCook(cook.ID, last); err != nil {
+			log.Printf("finish stale cook: %v", err)
+		}
+		return
+	}
+	pts, err := st.CookSamples(cook.ID)
+	if err != nil {
+		log.Printf("resume cook samples: %v", err)
+		return
+	}
+	mpts := make([]monitor.Point, len(pts))
+	for i, p := range pts {
+		mpts[i] = monitor.Point{At: p.At, TipCelsius: p.TipCelsius, AmbientCelsius: p.AmbientCelsius}
+	}
+	mon.Resume(cook.ID, cook.Name, cook.TargetCelsius, mpts)
+	log.Printf("resumed cook #%d %q with %d samples", cook.ID, cook.Name, len(mpts))
 }
 
 // startServer serves the web UI/API. It chooses one of three modes:

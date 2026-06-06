@@ -37,7 +37,15 @@ const state = {
 	alert: loadAlertConfig(),
 	alertState: 'ok', // 'ok' | 'low' | 'high'
 	etaWarned: false, // whether the "almost done" alert has fired this cook
+	hover: null, // { x } in canvas CSS px while pointer is over the chart
+	viewingCookId: null, // when set, the chart shows a saved cook instead of live
+	viewSeries: [], // points of the cook being viewed
+	viewMeta: null, // { name, startedAt } of the cook being viewed
+	cookName: '', // last cook name seen from the server
 };
+
+// Chart plot geometry from the last draw, used for pointer hit-testing.
+let chartGeom = null;
 
 function cToUnit(c) {
 	return state.unit === 'C' ? c : c * 9 / 5 + 32;
@@ -158,6 +166,13 @@ function render(status) {
 		el('updated').textContent = 'waiting for probe…';
 	}
 
+	// Current cook name: reflect server value without clobbering active typing.
+	state.cookName = status.cookName || '';
+	const nameInput = el('cook-name-input');
+	if (nameInput && document.activeElement !== nameInput) {
+		nameInput.value = state.cookName;
+	}
+
 	// Chart + ambient alerts.
 	if (status.hasReading) {
 		pushPoint(status);
@@ -240,12 +255,14 @@ function drawChart() {
 	const plotW = cssW - padL - padR;
 	const plotH = cssH - padT - padB;
 
-	const series = state.series;
+	const viewing = state.viewingCookId != null;
+	const series = viewing ? state.viewSeries : state.series;
 	if (series.length < 2) {
+		chartGeom = null;
 		ctx.fillStyle = 'rgba(138,150,176,.7)';
 		ctx.font = '13px sans-serif';
 		ctx.textAlign = 'center';
-		ctx.fillText('Collecting data…', cssW / 2, cssH / 2);
+		ctx.fillText(viewing ? 'No data for this cook' : 'Collecting data…', cssW / 2, cssH / 2);
 		return;
 	}
 
@@ -253,15 +270,20 @@ function drawChart() {
 	const t1 = series[series.length - 1].t;
 	const tSpan = Math.max(1, t1 - t0);
 
+	// Target temperature for this view (live status, or the saved cook's target).
+	const targetC = viewing
+		? (state.viewMeta && typeof state.viewMeta.target === 'number' ? state.viewMeta.target : null)
+		: (state.last ? state.last.targetCelsius : null);
+
 	// Y range from data + target, in the active unit, with padding.
 	let lo = Infinity, hi = -Infinity;
 	for (const p of series) {
 		lo = Math.min(lo, p.tip, p.amb);
 		hi = Math.max(hi, p.tip, p.amb);
 	}
-	if (state.last) {
-		lo = Math.min(lo, state.last.targetCelsius);
-		hi = Math.max(hi, state.last.targetCelsius);
+	if (targetC != null) {
+		lo = Math.min(lo, targetC);
+		hi = Math.max(hi, targetC);
 	}
 	if (state.alert.enabled) {
 		lo = Math.min(lo, state.alert.low);
@@ -302,17 +324,111 @@ function drawChart() {
 	}
 
 	// Threshold lines.
-	if (state.alert.enabled) {
+	if (state.alert.enabled && !viewing) {
 		drawHLine(ctx, padL, cssW - padR, y(state.alert.low), 'rgba(61,169,255,.55)');
 		drawHLine(ctx, padL, cssW - padR, y(state.alert.high), 'rgba(224,83,61,.55)');
 	}
 	// Target line.
-	if (state.last) {
-		drawHLine(ctx, padL, cssW - padR, y(state.last.targetCelsius), 'rgba(54,211,153,.6)');
+	if (targetC != null) {
+		drawHLine(ctx, padL, cssW - padR, y(targetC), 'rgba(54,211,153,.6)');
 	}
 
 	drawSeries(ctx, series, x, y, 'amb', getCss('--cool', '#3da9ff'));
 	drawSeries(ctx, series, x, y, 'tip', getCss('--accent', '#ff6b3d'));
+
+	// Remember geometry for pointer hit-testing, then draw the hover overlay.
+	chartGeom = { x, y, series, padL, padR, padT, padB, plotW, plotH, t0, t1, cssW, cssH, targetC };
+	drawHover(ctx);
+}
+
+// drawHover renders a crosshair, markers, and a tooltip at the sample nearest to
+// the pointer so you can read which temperature was reached at which time.
+function drawHover(ctx) {
+	if (!state.hover || !chartGeom) return;
+	const g = chartGeom;
+	const hx = state.hover.x;
+	if (hx < g.padL || hx > g.cssW - g.padR) return;
+
+	// Find the sample nearest the pointer in screen-x.
+	let best = null, bestDx = Infinity;
+	for (const p of g.series) {
+		const dx = Math.abs(g.x(p.t) - hx);
+		if (dx < bestDx) { bestDx = dx; best = p; }
+	}
+	if (!best) return;
+
+	const px = g.x(best.t);
+	const yTip = g.y(best.tip);
+	const yAmb = g.y(best.amb);
+
+	// Crosshair.
+	ctx.save();
+	ctx.strokeStyle = 'rgba(255,255,255,.25)';
+	ctx.lineWidth = 1;
+	ctx.beginPath();
+	ctx.moveTo(px, g.padT);
+	ctx.lineTo(px, g.cssH - g.padB);
+	ctx.stroke();
+
+	// Markers.
+	const tipColor = getCss('--accent', '#ff6b3d');
+	const ambColor = getCss('--cool', '#3da9ff');
+	const tgtColor = getCss('--good', '#36d399');
+	const markers = [[yTip, tipColor], [yAmb, ambColor]];
+	if (g.targetC != null) markers.push([g.y(g.targetC), tgtColor]);
+	for (const [yy, col] of markers) {
+		ctx.beginPath();
+		ctx.arc(px, yy, 3.5, 0, Math.PI * 2);
+		ctx.fillStyle = col;
+		ctx.fill();
+		ctx.lineWidth = 1.5;
+		ctx.strokeStyle = 'rgba(11,15,23,.9)';
+		ctx.stroke();
+	}
+
+	// Tooltip box. Each row is [text, color].
+	const time = new Date(best.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+	const rows = [
+		[time, 'rgba(225,231,245,.95)'],
+		[`Internal ${Math.round(cToUnit(best.tip) * 10) / 10}°${state.unit}`, tipColor],
+		[`Ambient ${Math.round(cToUnit(best.amb) * 10) / 10}°${state.unit}`, ambColor],
+	];
+	if (g.targetC != null) {
+		rows.push([`Target ${Math.round(cToUnit(g.targetC) * 10) / 10}°${state.unit}`, tgtColor]);
+	}
+	ctx.font = '11px sans-serif';
+	let boxW = 0;
+	for (const [text] of rows) boxW = Math.max(boxW, ctx.measureText(text).width);
+	boxW += 16;
+	const boxH = 12 + rows.length * 15;
+	let bx = px + 10;
+	if (bx + boxW > g.cssW - g.padR) bx = px - 10 - boxW;
+	const by = g.padT + 6;
+
+	ctx.fillStyle = 'rgba(20,26,38,.95)';
+	ctx.strokeStyle = 'rgba(255,255,255,.12)';
+	ctx.lineWidth = 1;
+	roundRect(ctx, bx, by, boxW, boxH, 6);
+	ctx.fill();
+	ctx.stroke();
+
+	ctx.textAlign = 'left';
+	ctx.textBaseline = 'top';
+	rows.forEach(([text, col], i) => {
+		ctx.fillStyle = col;
+		ctx.fillText(text, bx + 8, by + 7 + i * 15);
+	});
+	ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+	ctx.beginPath();
+	ctx.moveTo(x + r, y);
+	ctx.arcTo(x + w, y, x + w, y + h, r);
+	ctx.arcTo(x + w, y + h, x, y + h, r);
+	ctx.arcTo(x, y + h, x, y, r);
+	ctx.arcTo(x, y, x + w, y, r);
+	ctx.closePath();
 }
 
 function drawSeries(ctx, series, x, y, key, color) {
@@ -342,6 +458,153 @@ function drawHLine(ctx, x0, x1, py, color) {
 function getCss(varName, fallback) {
 	const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
 	return v || fallback;
+}
+
+// ---- Cooks (naming, new cook, saved history) ---------------------------
+
+async function saveCookName() {
+	const name = el('cook-name-input').value.trim();
+	try {
+		await fetch('/api/cook/name', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ name }),
+		});
+		loadCooks();
+	} catch (err) {
+		console.error('save cook name failed', err);
+	}
+}
+
+async function newCook() {
+	const name = el('cook-name-input').value.trim();
+	try {
+		await fetch('/api/cook/new', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ name }),
+		});
+		state.series = [];
+		state.viewingCookId = null;
+		state.etaWarned = false;
+		updateLiveButton();
+		drawChart();
+		loadCooks();
+	} catch (err) {
+		console.error('new cook failed', err);
+	}
+}
+
+function fmtCookSpan(c) {
+	const start = new Date(c.startedAt);
+	const end = c.endedAt ? new Date(c.endedAt) : null;
+	const day = start.toLocaleDateString([], { month: 'short', day: 'numeric' });
+	const t = start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	let dur = '';
+	if (end) {
+		const secs = Math.max(0, Math.round((end - start) / 1000));
+		dur = ' · ' + fmtDuration(secs);
+	}
+	return `${day} ${t}${dur}`;
+}
+
+async function loadCooks() {
+	const list = el('cooks-list');
+	if (!list) return;
+	try {
+		const res = await fetch('/api/cooks');
+		const cooks = await res.json();
+		list.innerHTML = '';
+		if (!cooks || cooks.length === 0) {
+			const li = document.createElement('li');
+			li.className = 'cooks-empty';
+			li.textContent = 'No saved cooks yet.';
+			list.appendChild(li);
+			return;
+		}
+		for (const c of cooks) {
+			const li = document.createElement('li');
+			li.className = 'cook-item' + (c.active ? ' cook-active' : '');
+			if (state.viewingCookId === c.id) li.classList.add('cook-viewing');
+			const name = (c.name && c.name.trim()) || 'Cook #' + c.id;
+			const maxTip = Math.round(cToUnit(c.maxTipCelsius));
+			li.innerHTML = `
+				<div class="cook-main">
+					<span class="cook-item-name">${escapeHtml(name)}</span>
+					<span class="cook-meta">${fmtCookSpan(c)}</span>
+				</div>
+				<div class="cook-side">
+					<span class="cook-max">max ${maxTip}°${state.unit}</span>
+					${c.active ? '<span class="cook-badge">live</span>' : ''}
+				</div>`;
+			li.addEventListener('click', () => viewCook(c.id, name, c.targetCelsius));
+			list.appendChild(li);
+		}
+	} catch (err) {
+		console.error('load cooks failed', err);
+	}
+}
+
+async function viewCook(id, name, targetCelsius) {
+	try {
+		const res = await fetch('/api/cooks/' + id);
+		const data = await res.json();
+		state.viewSeries = (data.points || []).map((p) => ({
+			t: new Date(p.at).getTime(),
+			tip: p.tipCelsius,
+			amb: p.ambientCelsius,
+		}));
+		state.viewingCookId = id;
+		state.viewMeta = { name, target: typeof targetCelsius === 'number' ? targetCelsius : null };
+		updateLiveButton();
+		drawChart();
+		loadCooks();
+	} catch (err) {
+		console.error('view cook failed', err);
+	}
+}
+
+function backToLive() {
+	state.viewingCookId = null;
+	state.viewMeta = null;
+	updateLiveButton();
+	drawChart();
+	loadCooks();
+}
+
+function updateLiveButton() {
+	const btn = el('chart-live');
+	const title = el('chart-title');
+	if (!btn || !title) return;
+	if (state.viewingCookId != null) {
+		btn.classList.remove('hidden');
+		title.textContent = state.viewMeta && state.viewMeta.name ? state.viewMeta.name : 'Saved cook';
+	} else {
+		btn.classList.add('hidden');
+		title.textContent = 'Temperature over time';
+	}
+}
+
+function escapeHtml(s) {
+	return String(s).replace(/[&<>"']/g, (c) => (
+		{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+	));
+}
+
+// setupHover wires pointer interaction on the chart for the crosshair tooltip.
+function setupHover() {
+	const canvas = el('chart');
+	if (!canvas) return;
+	const move = (clientX) => {
+		const rect = canvas.getBoundingClientRect();
+		state.hover = { x: clientX - rect.left };
+		drawChart();
+	};
+	canvas.addEventListener('mousemove', (e) => move(e.clientX));
+	canvas.addEventListener('mouseleave', () => { state.hover = null; drawChart(); });
+	canvas.addEventListener('touchstart', (e) => { if (e.touches[0]) move(e.touches[0].clientX); }, { passive: true });
+	canvas.addEventListener('touchmove', (e) => { if (e.touches[0]) move(e.touches[0].clientX); }, { passive: true });
+	canvas.addEventListener('touchend', () => { state.hover = null; drawChart(); });
 }
 
 // ---- Ambient alerts ----------------------------------------------------
@@ -586,11 +849,21 @@ function init() {
 	});
 	buildPresets();
 	setupAlerts();
+	setupHover();
+	el('cook-name-form').addEventListener('submit', (e) => {
+		e.preventDefault();
+		saveCookName();
+		el('cook-name-input').blur();
+	});
+	el('cook-new').addEventListener('click', newCook);
+	el('chart-live').addEventListener('click', backToLive);
+	el('cooks-refresh').addEventListener('click', loadCooks);
 	registerServiceWorker();
 	for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
 		window.addEventListener(ev, unlockAudio, { passive: true });
 	}
 	loadHistory();
+	loadCooks();
 	connectStream();
 	setInterval(updateEta, 1000); // smooth local countdown between updates
 	window.addEventListener('resize', drawChart);

@@ -25,8 +25,10 @@ services:
       - /var/run/dbus:/var/run/dbus
       # Persist auto-ACME certificates if you run with -acme-domain.
       - meater-certs:/app/acme-certs
+      # Persist the cook-history database across restarts/upgrades.
+      - meater-data:/data
 
-    command: ["-http", ":8088"]
+    command: ["-http", ":8088", "-db", "/data/meater.db"]
 
     # If the probe still won't connect, broaden privileges in this order:
     # cap_add: ["NET_ADMIN", "NET_RAW"]
@@ -34,3 +36,4 @@ services:
 
 volumes:
   meater-certs:
+  meater-data:

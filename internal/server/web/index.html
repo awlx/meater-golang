@@ -51,6 +51,17 @@
 			</section>
 
 			<section class="stack">
+				<div class="card cook-card">
+					<div class="targets-head">
+						<span>Current cook</span>
+						<button id="cook-new" class="cook-new" type="button">New cook</button>
+					</div>
+					<form id="cook-name-form" class="cook-name">
+						<input id="cook-name-input" type="text" maxlength="60" placeholder="What are you cooking?" />
+						<button type="submit">Save</button>
+					</form>
+				</div>
+
 				<div class="card stat">
 					<div class="stat-row">
 						<div class="stat-label">Ambient (cook)</div>
@@ -117,14 +128,23 @@
 
 			<section class="card chart-card">
 				<div class="chart-head">
-					<span class="chart-title">Temperature over time</span>
+					<span class="chart-title" id="chart-title">Temperature over time</span>
 					<div class="legend">
 						<span class="lg lg-tip">Internal</span>
 						<span class="lg lg-amb">Ambient</span>
 						<span class="lg lg-tgt">Target</span>
+						<button id="chart-live" class="chart-live hidden" type="button">← Live</button>
 					</div>
 				</div>
 				<canvas id="chart"></canvas>
+			</section>
+
+			<section class="card history-card">
+				<div class="chart-head">
+					<span class="chart-title">Past cooks</span>
+					<button id="cooks-refresh" class="cook-new" type="button">Refresh</button>
+				</div>
+				<ul id="cooks-list" class="cooks-list"></ul>
 			</section>
 		</main>
 

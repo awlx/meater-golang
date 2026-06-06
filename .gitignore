@@ -8,6 +8,12 @@
 # ACME / TLS cache
 /acme-certs/
 
+# SQLite cook-history database (created at runtime)
+*.db
+*.db-wal
+*.db-shm
+/data/
+
 # Local screenshots scratch (keep docs/screenshot.png tracked)
 # (nothing excluded here by default)
 

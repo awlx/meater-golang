@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/awlx/meater-golang/internal/monitor"
+	"github.com/awlx/meater-golang/internal/store"
 )
 
 //go:embed web
@@ -20,12 +23,14 @@ var webFS embed.FS
 // Server wires HTTP handlers to a Monitor.
 type Server struct {
 	mon *monitor.Monitor
+	st  *store.Store
 	mux *http.ServeMux
 }
 
-// New builds a Server backed by the given monitor.
-func New(mon *monitor.Monitor) *Server {
-	s := &Server{mon: mon, mux: http.NewServeMux()}
+// New builds a Server backed by the given monitor. st may be nil to disable the
+// cook-history endpoints.
+func New(mon *monitor.Monitor, st *store.Store) *Server {
+	s := &Server{mon: mon, st: st, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -40,6 +45,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/history", s.handleHistory)
 	s.mux.HandleFunc("/api/stream", s.handleStream)
 	s.mux.HandleFunc("/api/target", s.handleTarget)
+	s.mux.HandleFunc("/api/cooks", s.handleCooks)
+	s.mux.HandleFunc("/api/cooks/", s.handleCook)
+	s.mux.HandleFunc("/api/cook/new", s.handleCookNew)
+	s.mux.HandleFunc("/api/cook/name", s.handleCookName)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +57,77 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.mon.History())
+}
+
+// handleCooks lists recent cooks (newest first), including the active one.
+func (s *Server) handleCooks(w http.ResponseWriter, r *http.Request) {
+	if s.st == nil {
+		writeJSON(w, http.StatusOK, []store.CookMeta{})
+		return
+	}
+	cooks, err := s.st.ListCooks(11)
+	if err != nil {
+		http.Error(w, "failed to list cooks", http.StatusInternalServerError)
+		return
+	}
+	if cooks == nil {
+		cooks = []store.CookMeta{}
+	}
+	writeJSON(w, http.StatusOK, cooks)
+}
+
+// handleCook returns a single cook's samples at /api/cooks/{id}.
+func (s *Server) handleCook(w http.ResponseWriter, r *http.Request) {
+	if s.st == nil {
+		http.NotFound(w, r)
+		return
+	}
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/cooks/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid cook id", http.StatusBadRequest)
+		return
+	}
+	pts, err := s.st.CookSamples(id)
+	if err != nil {
+		http.Error(w, "failed to load cook", http.StatusInternalServerError)
+		return
+	}
+	if pts == nil {
+		pts = []store.Point{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "points": pts})
+}
+
+// handleCookNew ends the current cook and starts a fresh one.
+func (s *Server) handleCookNew(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.mon.NewCook(strings.TrimSpace(body.Name))
+	writeJSON(w, http.StatusOK, s.mon.Status())
+}
+
+// handleCookName renames the current cook.
+func (s *Server) handleCookName(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	s.mon.SetCookName(strings.TrimSpace(body.Name))
+	writeJSON(w, http.StatusOK, s.mon.Status())
 }
 
 // handleTarget sets the target tip temperature. Accepts JSON {"celsius": N} or
