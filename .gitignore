@@ -1,0 +1,18 @@
+# Compiled binaries
+/meater
+/meater-golang
+*.exe
+*.test
+*.out
+
+# ACME / TLS cache
+/acme-certs/
+
+# Local screenshots scratch (keep docs/screenshot.png tracked)
+# (nothing excluded here by default)
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/

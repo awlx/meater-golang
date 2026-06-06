@@ -1,0 +1,36 @@
+# Ready-to-go Compose setup.
+#
+# Real probe (Linux host only): the container uses the host's Bluetooth stack
+# via the host network and the host D-Bus system bus. Just run:
+#
+#   docker compose up -d --build
+#
+# Then open http://<host>:8088/  (add TLS yourself if you want it; see README).
+#
+# To try the UI WITHOUT a probe, change the command below to:
+#   command: ["-mock", "-http", ":8088"]
+# (mock needs neither the host network nor D-Bus, but leaving them set is fine).
+
+services:
+  meater:
+    build: .
+    image: ghcr.io/awlx/meater:latest
+    container_name: meater
+    restart: unless-stopped
+
+    # BLE needs direct access to the host Bluetooth stack.
+    network_mode: host
+    user: "0:0" # root, so the container is allowed to talk to BlueZ over D-Bus
+    volumes:
+      - /var/run/dbus:/var/run/dbus
+      # Persist auto-ACME certificates if you run with -acme-domain.
+      - meater-certs:/app/acme-certs
+
+    command: ["-http", ":8088"]
+
+    # If the probe still won't connect, broaden privileges in this order:
+    # cap_add: ["NET_ADMIN", "NET_RAW"]
+    # privileged: true
+
+volumes:
+  meater-certs:

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<meta name="theme-color" content="#0b0f17" />
+	<title>MEATER Monitor</title>
+	<link rel="stylesheet" href="styles.css" />
+	<link rel="manifest" href="manifest.webmanifest" />
+	<link rel="icon"
+		href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌡️</text></svg>" />
+</head>
+
+<body>
+	<div class="app">
+		<header class="topbar">
+			<div class="brand">
+				<span class="brand-mark">🥩</span>
+				<h1>MEATER<span>Monitor</span></h1>
+			</div>
+			<div class="controls">
+				<div id="status-pill" class="pill pill-off">
+					<span class="dot"></span><span id="status-text">connecting…</span>
+				</div>
+				<button id="unit-toggle" class="unit-toggle" type="button" aria-label="Toggle units">
+					°C
+				</button>
+			</div>
+		</header>
+
+		<div id="alert-banner" class="alert-banner hidden" role="alert">
+			<span id="alert-text"></span>
+			<button id="alert-dismiss" type="button" aria-label="Dismiss">Dismiss</button>
+		</div>
+
+		<main class="grid">
+			<section class="card ring-card">
+				<div class="ring-wrap">
+					<svg class="ring" viewBox="0 0 200 200">
+						<circle class="ring-track" cx="100" cy="100" r="86" />
+						<circle id="ring-progress" class="ring-progress" cx="100" cy="100" r="86" />
+					</svg>
+					<div class="ring-center">
+						<div class="ring-label">internal</div>
+						<div id="tip-temp" class="ring-temp">--<span class="unit">°</span></div>
+						<div id="target-readout" class="ring-target">target --°</div>
+					</div>
+				</div>
+				<div id="state-badge" class="state-badge state-waiting">waiting</div>
+			</section>
+
+			<section class="stack">
+				<div class="card stat">
+					<div class="stat-row">
+						<div class="stat-label">Ambient (cook)</div>
+						<div id="ambient-temp" class="stat-value">--<span class="unit">°</span></div>
+					</div>
+					<div class="stat-row">
+						<div class="stat-label">Rise rate</div>
+						<div id="rate" class="stat-value small">-- <span class="unit">°/min</span></div>
+					</div>
+				</div>
+
+				<div class="card eta">
+					<div class="eta-label">Estimated time remaining</div>
+					<div id="eta" class="eta-value">--:--</div>
+					<div id="eta-ready" class="eta-ready hidden">Ready to serve 🎉</div>
+				</div>
+
+				<div class="card targets">
+					<div class="targets-head">
+						<span>Target doneness</span>
+						<form id="custom-form" class="custom">
+							<input id="custom-input" type="number" inputmode="decimal" step="1" placeholder="custom" />
+							<button type="submit">Set</button>
+						</form>
+					</div>
+					<div id="preset-row" class="preset-row"></div>
+				</div>
+
+				<div class="card alerts-card">
+					<div class="targets-head">
+						<span>Ambient alerts</span>
+						<label class="switch">
+							<input id="alerts-enabled" type="checkbox" />
+							<span>On</span>
+						</label>
+					</div>
+					<div class="alert-rows">
+						<label class="alert-row">
+							<span>Below</span>
+							<input id="alert-low" type="number" inputmode="decimal" step="1" placeholder="min" />
+							<span class="alert-unit">°</span>
+						</label>
+						<label class="alert-row">
+							<span>Above</span>
+							<input id="alert-high" type="number" inputmode="decimal" step="1" placeholder="max" />
+							<span class="alert-unit">°</span>
+						</label>
+					</div>
+					<div class="targets-head eta-alert-head">
+						<span>Almost-done alert</span>
+						<label class="switch">
+							<input id="eta-enabled" type="checkbox" />
+							<span>On</span>
+						</label>
+					</div>
+					<label class="alert-row">
+						<span>Notify</span>
+						<input id="eta-minutes" type="number" inputmode="numeric" step="5" min="1" placeholder="30" />
+						<span>min before done</span>
+					</label>
+					<button id="notif-enable" class="notif-btn" type="button">Enable browser notifications</button>
+				</div>
+			</section>
+
+			<section class="card chart-card">
+				<div class="chart-head">
+					<span class="chart-title">Temperature over time</span>
+					<div class="legend">
+						<span class="lg lg-tip">Internal</span>
+						<span class="lg lg-amb">Ambient</span>
+						<span class="lg lg-tgt">Target</span>
+					</div>
+				</div>
+				<canvas id="chart"></canvas>
+			</section>
+		</main>
+
+		<footer class="foot">
+			<span id="updated">—</span>
+		</footer>
+	</div>
+
+	<script src="app.js"></script>
+</body>
+
+</html>

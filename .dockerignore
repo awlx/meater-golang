@@ -1,0 +1,13 @@
+# Build artifacts and local files that don't belong in the image.
+meater
+meater-golang
+*.exe
+acme-certs/
+.git
+.gitignore
+.github
+Dockerfile
+docker-compose*.yml
+*.md
+docs/
+.DS_Store

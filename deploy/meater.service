@@ -1,0 +1,20 @@
+[Unit]
+Description=MEATER probe web monitor
+Documentation=https://github.com/awlx/meater-golang
+After=bluetooth.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust User and the paths below to match your install.
+User=meater
+WorkingDirectory=/opt/meater
+# Plain HTTP on a backend port. TLS is optional: either let the binary obtain a
+# certificate with -acme-domain, or run it behind a reverse proxy that
+# terminates TLS. See the README.
+ExecStart=/opt/meater/meater -http :8088
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

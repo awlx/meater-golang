@@ -1,0 +1,16 @@
+{
+	"name": "MEATER Monitor",
+	"short_name": "MEATER",
+	"description": "Live MEATER probe temperatures, cook curve, and alerts.",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#0b0f17",
+	"theme_color": "#0b0f17",
+	"icons": [
+		{
+			"src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%F0%9F%A5%A9</text></svg>",
+			"sizes": "any",
+			"type": "image/svg+xml"
+		}
+	]
+}
