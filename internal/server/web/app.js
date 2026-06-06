@@ -267,8 +267,9 @@ function drawChart() {
 		lo = Math.min(lo, state.alert.low);
 		hi = Math.max(hi, state.alert.high);
 	}
-	const padY = Math.max(2, (hi - lo) * 0.1);
-	lo -= padY; hi += padY;
+	// Anchor the chart at 0 so the curve is easy to read; pad the top only.
+	lo = 0;
+	hi += Math.max(2, hi * 0.1);
 	const ySpan = Math.max(1, hi - lo);
 
 	const x = (t) => padL + ((t - t0) / tSpan) * plotW;
