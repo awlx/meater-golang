@@ -79,6 +79,19 @@ docker compose up -d --build
 # open http://<host>:8080/
 ```
 
+The image is also published to GHCR by a GitHub Actions workflow
+([`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml))
+on every push to `main` and on `v*` tags, so you can pull it instead of
+building:
+
+```sh
+docker pull ghcr.io/awlx/meater:latest
+```
+
+> The compose file references `ghcr.io/awlx/meater:latest`. With `--build` it
+> builds locally; without it, Docker pulls from GHCR (make the GHCR package
+> public once after the first publish to allow anonymous pulls).
+
 To just try the UI without a probe (works anywhere, including macOS/Windows
 Docker Desktop):
 
