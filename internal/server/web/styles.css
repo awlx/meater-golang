@@ -522,6 +522,12 @@ body {
 	color: var(--accent);
 }
 
+/* Stop state for the Start/Stop session toggle. */
+#session-toggle.session-stop {
+	border-color: var(--bad, #e5484d);
+	color: var(--bad, #e5484d);
+}
+
 .chart-live {
 	background: var(--card-2);
 	border: 1px solid var(--line);

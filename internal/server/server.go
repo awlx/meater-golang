@@ -49,6 +49,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/cooks/", s.handleCook)
 	s.mux.HandleFunc("/api/cook/new", s.handleCookNew)
 	s.mux.HandleFunc("/api/cook/name", s.handleCookName)
+	s.mux.HandleFunc("/api/session/start", s.handleSessionStart)
+	s.mux.HandleFunc("/api/session/stop", s.handleSessionStop)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +129,34 @@ func (s *Server) handleCookName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mon.SetCookName(strings.TrimSpace(body.Name))
+	writeJSON(w, http.StatusOK, s.mon.Status())
+}
+
+// handleSessionStart begins probe discovery and a fresh cook. An optional
+// {"name": ...} sets the cook name before starting.
+func (s *Server) handleSessionStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if name := strings.TrimSpace(body.Name); name != "" {
+		s.mon.SetCookName(name)
+	}
+	s.mon.Start()
+	writeJSON(w, http.StatusOK, s.mon.Status())
+}
+
+// handleSessionStop halts probe discovery and ends the current cook.
+func (s *Server) handleSessionStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.mon.Stop()
 	writeJSON(w, http.StatusOK, s.mon.Status())
 }
 

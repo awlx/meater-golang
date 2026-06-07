@@ -45,6 +45,7 @@ type Status struct {
 	ETASeconds        float64   `json:"etaSeconds"` // -1 when unknown
 	State             string    `json:"state"`
 	HasReading        bool      `json:"hasReading"`
+	Running           bool      `json:"running"` // probe discovery is active
 	CookName          string    `json:"cookName"`
 	CookID            int64     `json:"cookId"`
 	UpdatedAt         time.Time `json:"updatedAt"`
@@ -52,6 +53,7 @@ type Status struct {
 
 // Cooking states reported to clients.
 const (
+	StateIdle         = "idle" // discovery stopped; waiting for Start
 	StateDisconnected = "disconnected"
 	StateWaiting      = "waiting"
 	StateCooking      = "cooking"
@@ -77,15 +79,114 @@ type Monitor struct {
 	pendingName  string // applied to the next cook that auto-starts
 	lastSampleAt time.Time
 	idleTimeout  time.Duration
+
+	// Discovery control. running gates the BLE loop so the app only scans
+	// for the probe after the user presses Start. startCond wakes the loop
+	// when running flips true; stopCh is closed on Stop to interrupt an
+	// in-progress scan or stream.
+	running   bool
+	startCond *sync.Cond
+	stopCh    chan struct{}
 }
 
 // New returns a Monitor with the given default target temperature in Celsius.
 func New(targetCelsius float64) *Monitor {
-	return &Monitor{
+	m := &Monitor{
 		target:      targetCelsius,
 		subs:        make(map[chan Status]struct{}),
 		idleTimeout: defaultIdleTimeout,
 	}
+	m.startCond = sync.NewCond(&m.mu)
+	// Start stopped: a closed channel reflects "not running" until Start.
+	m.stopCh = make(chan struct{})
+	close(m.stopCh)
+	return m
+}
+
+// Start begins probe discovery and marks a fresh cook: the next reading after
+// Start opens a new cook session. It is a no-op if already running.
+func (m *Monitor) Start() {
+	now := time.Now()
+	m.mu.Lock()
+	if m.running {
+		m.mu.Unlock()
+		return
+	}
+	m.running = true
+	m.stopCh = make(chan struct{})
+	oldID := m.cookID
+	// Begin a fresh cook; the first reading after Start opens it.
+	m.cookID = 0
+	m.history = m.history[:0]
+	m.hasRead = false
+	m.lastSampleAt = time.Time{}
+	st := m.st
+	m.startCond.Broadcast()
+	status := m.statusLocked()
+	m.mu.Unlock()
+	if st != nil && oldID != 0 {
+		if err := st.EndCook(oldID, now); err != nil {
+			log.Printf("store: end cook: %v", err)
+		}
+		if err := st.Prune(); err != nil {
+			log.Printf("store: prune: %v", err)
+		}
+	}
+	m.broadcast(status)
+}
+
+// Stop halts probe discovery, disconnects, and ends the current cook. It is a
+// no-op if already stopped.
+func (m *Monitor) Stop() {
+	now := time.Now()
+	m.mu.Lock()
+	if !m.running {
+		m.mu.Unlock()
+		return
+	}
+	m.running = false
+	close(m.stopCh)
+	m.connected = false
+	m.hasRead = false
+	oldID := m.cookID
+	m.cookID = 0
+	st := m.st
+	status := m.statusLocked()
+	m.mu.Unlock()
+	if st != nil && oldID != 0 {
+		if err := st.EndCook(oldID, now); err != nil {
+			log.Printf("store: end cook: %v", err)
+		}
+		if err := st.Prune(); err != nil {
+			log.Printf("store: prune: %v", err)
+		}
+	}
+	m.broadcast(status)
+}
+
+// Running reports whether probe discovery is currently active.
+func (m *Monitor) Running() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.running
+}
+
+// WaitForStart blocks until discovery is started. The BLE loop calls it before
+// scanning so nothing happens in the background until the user presses Start.
+func (m *Monitor) WaitForStart() {
+	m.mu.Lock()
+	for !m.running {
+		m.startCond.Wait()
+	}
+	m.mu.Unlock()
+}
+
+// StopChan returns a channel that is closed when discovery is stopped. The BLE
+// loop selects on it to abort an in-progress scan or stream.
+func (m *Monitor) StopChan() <-chan struct{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.stopCh
 }
 
 // SetStore attaches a persistence backend. idleTimeout overrides the default
@@ -122,6 +223,10 @@ func (m *Monitor) Resume(cookID int64, name string, target float64, pts []Point)
 	if n := len(m.history); n > 0 {
 		m.lastSampleAt = m.history[n-1].at
 	}
+	// Resuming a live cook means discovery should be active immediately.
+	m.running = true
+	m.stopCh = make(chan struct{})
+	m.startCond.Broadcast()
 	m.mu.Unlock()
 }
 
@@ -349,6 +454,7 @@ func (m *Monitor) statusLocked() Status {
 	s := Status{
 		Connected:        m.connected,
 		HasReading:       m.hasRead,
+		Running:          m.running,
 		TargetCelsius:    round1(m.target),
 		TargetFahrenheit: round1(celsiusToFahrenheit(m.target)),
 		ETASeconds:       -1,
@@ -358,6 +464,10 @@ func (m *Monitor) statusLocked() Status {
 		State:            StateDisconnected,
 	}
 
+	if !m.running {
+		s.State = StateIdle
+		return s
+	}
 	if !m.connected {
 		return s
 	}

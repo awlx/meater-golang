@@ -109,10 +109,16 @@ async function setTarget(celsius) {
 function render(status) {
 	state.last = status;
 
+	// Session control button (Start / Stop).
+	updateSessionButton(status);
+
 	// Connection pill.
 	const pill = el('status-pill');
 	const txt = el('status-text');
-	if (status.connected && status.hasReading) {
+	if (!status.running) {
+		pill.className = 'pill pill-off';
+		txt.textContent = 'stopped';
+	} else if (status.connected && status.hasReading) {
 		pill.className = 'pill pill-on';
 		txt.textContent = 'live';
 	} else if (status.connected) {
@@ -120,7 +126,7 @@ function render(status) {
 		txt.textContent = 'connected';
 	} else {
 		pill.className = 'pill pill-off';
-		txt.textContent = 'no probe';
+		txt.textContent = 'searching…';
 	}
 
 	// Temperatures.
@@ -517,10 +523,12 @@ async function saveCookName() {
 	}
 }
 
-async function newCook() {
+// Start probe discovery and a fresh cook. The current name field is sent so the
+// new cook is created with it.
+async function startSession() {
 	const name = el('cook-name-input').value.trim();
 	try {
-		await fetch('/api/cook/new', {
+		await fetch('/api/session/start', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ name }),
@@ -532,7 +540,39 @@ async function newCook() {
 		drawChart();
 		loadCooks();
 	} catch (err) {
-		console.error('new cook failed', err);
+		console.error('start session failed', err);
+	}
+}
+
+// Stop probe discovery and end the current cook.
+async function stopSession() {
+	try {
+		await fetch('/api/session/stop', { method: 'POST' });
+		loadCooks();
+	} catch (err) {
+		console.error('stop session failed', err);
+	}
+}
+
+// toggleSession starts or stops discovery based on the current running state.
+function toggleSession() {
+	if (state.last && state.last.running) {
+		stopSession();
+	} else {
+		startSession();
+	}
+}
+
+// updateSessionButton reflects the running state on the Start/Stop button.
+function updateSessionButton(status) {
+	const btn = el('session-toggle');
+	if (!btn) return;
+	if (status.running) {
+		btn.textContent = 'Stop';
+		btn.classList.add('session-stop');
+	} else {
+		btn.textContent = 'Start';
+		btn.classList.remove('session-stop');
 	}
 }
 
@@ -896,7 +936,7 @@ function init() {
 		saveCookName();
 		el('cook-name-input').blur();
 	});
-	el('cook-new').addEventListener('click', newCook);
+	el('session-toggle').addEventListener('click', toggleSession);
 	el('chart-live').addEventListener('click', backToLive);
 	el('cooks-refresh').addEventListener('click', loadCooks);
 	registerServiceWorker();

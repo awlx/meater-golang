@@ -215,11 +215,19 @@ func runBLE(mon *monitor.Monitor) {
 	tempUUID := mustUUID(meater.TemperatureCharUUID)
 
 	for {
-		conn := findAndConnect()
+		// Block until the user presses Start; nothing scans in the background.
+		mon.WaitForStart()
+		stop := mon.StopChan()
+
+		conn, ok := findAndConnect(stop)
+		if !ok {
+			// Stopped before a probe was found.
+			continue
+		}
 		mon.SetConnected(true)
 		log.Println("connected, discovering services...")
 
-		if streamUntilStale(conn, serviceUUID, tempUUID, mon) {
+		if streamUntilStale(conn, serviceUUID, tempUUID, mon, stop) {
 			log.Println("stream stalled, reconnecting...")
 		}
 		_ = conn.Disconnect()
@@ -228,8 +236,9 @@ func runBLE(mon *monitor.Monitor) {
 }
 
 // streamUntilStale subscribes to the temperature characteristic and feeds the
-// monitor until the stream goes silent. It returns true once stale.
-func streamUntilStale(conn bluetooth.Device, serviceUUID, tempUUID bluetooth.UUID, mon *monitor.Monitor) bool {
+// monitor until the stream goes silent or stop is closed. It returns true once
+// stale (so the caller reconnects) and false when stopped by the user.
+func streamUntilStale(conn bluetooth.Device, serviceUUID, tempUUID bluetooth.UUID, mon *monitor.Monitor, stop <-chan struct{}) bool {
 	// Enumerate the whole GATT table rather than filtering by a hard-coded
 	// service UUID: BlueZ resolves the services it sees over the air, and the
 	// MEATER+ doesn't always advertise the service UUID we expect. We log what
@@ -288,7 +297,11 @@ func streamUntilStale(conn bluetooth.Device, serviceUUID, tempUUID bluetooth.UUI
 
 	log.Println("streaming temperatures")
 	for {
-		time.Sleep(5 * time.Second)
+		select {
+		case <-stop:
+			return false
+		case <-time.After(5 * time.Second):
+		}
 		if time.Since(time.Unix(0, lastUpdate.Load())) > 20*time.Second {
 			return true
 		}
@@ -296,27 +309,40 @@ func streamUntilStale(conn bluetooth.Device, serviceUUID, tempUUID bluetooth.UUI
 }
 
 // runMock simulates a cold roast warming toward a hot oven so the UI and ETA
-// estimator can be exercised without hardware.
+// estimator can be exercised without hardware. Like the real BLE loop it only
+// produces readings between Start and Stop.
 func runMock(mon *monitor.Monitor) {
-	mon.SetConnected(true)
-	const ambient = 110.0
-	tip := 6.0
 	for {
-		tip += (ambient-tip)*0.02 + rand.Float64()*0.05
-		if tip > ambient-1 {
-			tip = ambient - 1
+		mon.WaitForStart()
+		stop := mon.StopChan()
+		mon.SetConnected(true)
+		const ambient = 110.0
+		tip := 6.0
+		running := true
+		for running {
+			select {
+			case <-stop:
+				running = false
+			default:
+				tip += (ambient-tip)*0.02 + rand.Float64()*0.05
+				if tip > ambient-1 {
+					tip = ambient - 1
+				}
+				mon.Update(meater.Reading{
+					TipCelsius:     tip,
+					AmbientCelsius: ambient + (rand.Float64()-0.5)*3,
+				})
+				time.Sleep(time.Second)
+			}
 		}
-		mon.Update(meater.Reading{
-			TipCelsius:     tip,
-			AmbientCelsius: ambient + (rand.Float64()-0.5)*3,
-		})
-		time.Sleep(time.Second)
+		mon.SetConnected(false)
 	}
 }
 
 // findAndConnect repeatedly scans for the probe and connects to it, retrying
-// until it succeeds or the overall timeout elapses.
-func findAndConnect() bluetooth.Device {
+// until it succeeds, the overall timeout elapses, or stop is closed. ok is
+// false when discovery was stopped before a probe was connected.
+func findAndConnect(stop <-chan struct{}) (bluetooth.Device, bool) {
 	deadline := time.Time{}
 	if *overallTimeout > 0 {
 		deadline = time.Now().Add(*overallTimeout)
@@ -329,7 +355,13 @@ func findAndConnect() bluetooth.Device {
 	}
 
 	for attempt := 1; ; attempt++ {
-		result, found, err := scanOnce(*scanWindow)
+		select {
+		case <-stop:
+			return bluetooth.Device{}, false
+		default:
+		}
+
+		result, found, err := scanOnce(*scanWindow, stop)
 		if err != nil {
 			// BlueZ can report "Operation already in progress" if a previous
 			// scan has not fully stopped yet. Recover instead of exiting.
@@ -350,11 +382,18 @@ func findAndConnect() bluetooth.Device {
 			}
 			conn, err := connectWithRetries(result.Address)
 			if err == nil {
-				return conn
+				return conn, true
 			}
 			log.Printf("connection failed: %v", err)
 		} else {
 			log.Printf("no probe found on attempt %d", attempt)
+		}
+
+		// Bail promptly if the user pressed Stop during the attempt.
+		select {
+		case <-stop:
+			return bluetooth.Device{}, false
+		default:
 		}
 
 		if !deadline.IsZero() && time.Now().After(deadline) {
@@ -366,7 +405,8 @@ func findAndConnect() bluetooth.Device {
 
 // scanOnce runs a single scan attempt for up to window, returning the first
 // matching probe it sees. found is false if the window elapsed with no match.
-func scanOnce(window time.Duration) (result bluetooth.ScanResult, found bool, err error) {
+// Closing stop aborts the scan early.
+func scanOnce(window time.Duration, stop <-chan struct{}) (result bluetooth.ScanResult, found bool, err error) {
 	// Clear any lingering discovery so BlueZ doesn't reject the new scan with
 	// "Operation already in progress".
 	_ = adapter.StopScan()
@@ -374,6 +414,17 @@ func scanOnce(window time.Duration) (result bluetooth.ScanResult, found bool, er
 
 	timer := time.AfterFunc(window, func() { _ = adapter.StopScan() })
 	defer timer.Stop()
+
+	// Abort the scan immediately if the user presses Stop mid-window.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-stop:
+			_ = adapter.StopScan()
+		case <-done:
+		}
+	}()
 
 	err = adapter.Scan(func(a *bluetooth.Adapter, r bluetooth.ScanResult) {
 		if !matches(r) {
