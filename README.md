@@ -148,7 +148,7 @@ sudo setcap 'cap_net_raw,cap_net_admin+eip' /opt/meater/meater
 | `-target`           | `63`         | Default target tip temperature in Celsius.                                       |
 | `-mock`             | `false`      | Simulate a probe instead of using Bluetooth (for UI testing).                    |
 | `-db`               | `meater.db`  | SQLite file for cook history (empty string disables persistence).                |
-| `-cook-idle`        | `5m`         | Finish the current cook after this long without a reading.                       |
+| `-cook-idle`        | `30m`        | Finish the current cook after this long without a reading (covers BLE drops/reconnects). |
 
 The program retries scanning automatically, so you can start it before freeing
 the probe and it will connect as soon as the probe begins advertising:
