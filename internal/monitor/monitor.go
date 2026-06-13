@@ -6,6 +6,7 @@ package monitor
 
 import (
 	"log"
+	"math"
 	"sync"
 	"time"
 
@@ -13,8 +14,32 @@ import (
 	"github.com/awlx/meater-golang/internal/store"
 )
 
-// rateWindow is how far back the cooking-rate regression looks.
+// rateWindow is how far back the cooking-rate regression looks for the live
+// displayed rate. It is short so the figure stays responsive on fast cooks
+// (a steak is done in minutes).
 const rateWindow = 3 * time.Minute
+
+// etaRateWindow smooths the cooking rate over a longer span than rateWindow
+// specifically for the time-to-target estimate. The stall — the evaporative
+// plateau where a large cut (pork shoulder, brisket) barely rises for an hour
+// or more — makes a short window read a near-zero rate and throw the ETA to
+// infinity. Averaging over a longer span keeps the estimate stable through it.
+// The window is only a maximum lookback, so early/short cooks simply use
+// whatever history they have.
+const etaRateWindow = 12 * time.Minute
+
+// stallRatePerSec is the rate below which the cook is treated as stalled rather
+// than progressing. 0.01 °C/min (0.6 °C/hour) is well into plateau territory.
+const stallRatePerSec = 0.01 / 60
+
+// etaMaxSeconds caps the estimate. Beyond this the rate is so low (a deep
+// stall) that any number is meaningless, so the UI reports "unknown" instead
+// of an absurd multi-day figure.
+const etaMaxSeconds = 24 * 60 * 60
+
+// ambientWindow is how far back to average the ambient (cook chamber)
+// temperature when using it as the asymptote for the ETA model.
+const ambientWindow = 5 * time.Minute
 
 // historyLimit caps the number of retained samples. It is large enough to hold
 // the full span of even a very long cook (a multi-day smoke at one sample every
@@ -22,8 +47,9 @@ const rateWindow = 3 * time.Minute
 const historyLimit = 200000
 
 // defaultIdleTimeout is how long without a reading marks the current cook as
-// finished.
-const defaultIdleTimeout = 5 * time.Minute
+// finished. It is generous so a transient BLE drop/reconnect does not split a
+// long cook into two sessions.
+const defaultIdleTimeout = 30 * time.Minute
 
 // sample is a single timestamped reading.
 type sample struct {
@@ -228,6 +254,22 @@ func (m *Monitor) Resume(cookID int64, name string, target float64, pts []Point)
 	m.stopCh = make(chan struct{})
 	m.startCond.Broadcast()
 	m.mu.Unlock()
+}
+
+// EnableDiscovery starts probe discovery without resuming a cook, so the BLE
+// loop scans and the next reading opens a fresh cook. It is used on startup
+// when a previous cook was too old to resume but the app should still reconnect
+// to the probe on its own rather than sitting idle waiting for Start.
+func (m *Monitor) EnableDiscovery() {
+	m.mu.Lock()
+	if !m.running {
+		m.running = true
+		m.stopCh = make(chan struct{})
+		m.startCond.Broadcast()
+	}
+	status := m.statusLocked()
+	m.mu.Unlock()
+	m.broadcast(status)
 }
 
 // SetConnected records the BLE connection state and notifies subscribers.
@@ -485,6 +527,10 @@ func (m *Monitor) statusLocked() Status {
 	ratePerSec, ok := m.rateLocked()
 	s.RateCelsiusPerMin = round2(ratePerSec * 60)
 
+	// The ETA uses a rate smoothed over a longer window so the stall does not
+	// throw it to infinity; the displayed rate above stays short and responsive.
+	etaRate, etaOK := m.rateLockedWindow(etaRateWindow)
+
 	switch {
 	case tip >= m.target:
 		s.State = StateReady
@@ -492,21 +538,100 @@ func (m *Monitor) statusLocked() Status {
 	case !ok || ratePerSec <= 1e-4:
 		s.State = StateStalled
 	default:
-		s.State = StateCooking
-		s.ETASeconds = (m.target - tip) / ratePerSec
+		eta := -1.0
+		if etaOK && etaRate > stallRatePerSec {
+			eta = etaSeconds(tip, m.target, m.ambientAvgLocked(ambientWindow), etaRate)
+		}
+		if eta < 0 {
+			// Rate too low or so far out the estimate is meaningless: report a
+			// stall (with an unknown ETA) rather than a misleading number.
+			s.State = StateStalled
+		} else {
+			s.State = StateCooking
+			s.ETASeconds = eta
+		}
 	}
 	return s
 }
 
-// rateLocked computes the tip temperature rise in Celsius per second using a
-// least-squares fit over the recent history window. The caller must hold the
-// lock. ok is false when there is not enough data.
+// etaSeconds estimates the seconds until the tip reaches target using Newton's
+// law of cooling: the tip approaches the cook-chamber (ambient) temperature
+// exponentially, so its rise decelerates as it nears ambient. Modelling that
+// curve avoids the wildly optimistic estimate a straight-line extrapolation
+// produces during the fast initial rise — the reason a pulled pork looked
+// "done in 2h" when it is really many hours away.
+//
+// With dT/dt = k·(ambient − tip) the instantaneous rate gives k = rate/(ambient
+// − tip), and the time to reach target is ln((ambient − tip)/(ambient −
+// target)) / k. The estimate is always longer than the linear one (because
+// −ln(1−x) > x), and it stretches automatically as the rate falls off in the
+// stall. It falls back to a straight line only when the chamber is not yet
+// meaningfully hotter than the target, so the UI still shows something. The
+// result is capped at etaMaxSeconds: a deep stall produces an arbitrarily large
+// number that is better reported as "unknown" (-1) than shown literally.
+//
+// Note this model is meat-agnostic by design — like the official app it reads
+// the cut's thermal mass straight off the measured rise rate and the chamber
+// temperature rather than from a per-meat-type table.
+func etaSeconds(tip, target, ambient, ratePerSec float64) float64 {
+	if ratePerSec <= 0 || target <= tip {
+		return -1
+	}
+	gapNow := ambient - tip
+	gapTarget := ambient - target
+	var eta float64
+	if gapTarget >= 1 && gapNow > gapTarget {
+		k := ratePerSec / gapNow
+		eta = math.Log(gapNow/gapTarget) / k
+	} else {
+		eta = (target - tip) / ratePerSec
+	}
+	if eta > etaMaxSeconds {
+		return -1
+	}
+	return eta
+}
+
+// ambientAvgLocked averages the ambient (cook chamber) temperature over the
+// recent window so a single noisy sample doesn't swing the ETA. It falls back
+// to the latest ambient when the window holds no samples. The caller must hold
+// at least a read lock.
+func (m *Monitor) ambientAvgLocked(window time.Duration) float64 {
+	if len(m.history) == 0 {
+		return m.latest.AmbientCelsius
+	}
+	cutoff := time.Now().Add(-window)
+	var sum float64
+	var n int
+	for i := len(m.history) - 1; i >= 0; i-- {
+		if m.history[i].at.Before(cutoff) {
+			break
+		}
+		sum += m.history[i].reading.AmbientCelsius
+		n++
+	}
+	if n == 0 {
+		return m.latest.AmbientCelsius
+	}
+	return sum / float64(n)
+}
+
+// rateLocked computes the tip temperature rise in Celsius per second over the
+// short live-display window. The caller must hold the lock.
 func (m *Monitor) rateLocked() (perSec float64, ok bool) {
+	return m.rateLockedWindow(rateWindow)
+}
+
+// rateLockedWindow computes the tip temperature rise in Celsius per second
+// using a least-squares fit over the most recent window. The caller must hold
+// the lock. ok is false when there is not enough data. A longer window smooths
+// the stall for the ETA; a shorter one keeps the live rate responsive.
+func (m *Monitor) rateLockedWindow(window time.Duration) (perSec float64, ok bool) {
 	if len(m.history) < 2 {
 		return 0, false
 	}
 	now := time.Now()
-	cutoff := now.Add(-rateWindow)
+	cutoff := now.Add(-window)
 
 	var n, sumX, sumY, sumXY, sumXX float64
 	for _, smp := range m.history {

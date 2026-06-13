@@ -55,8 +55,8 @@ var (
 		"simulate a probe instead of using Bluetooth (for UI testing)")
 	dbPath = flag.String("db", "meater.db",
 		"path to the SQLite database for cook history (empty disables persistence)")
-	cookIdle = flag.Duration("cook-idle", 5*time.Minute,
-		"finish the current cook after this long without a reading")
+	cookIdle = flag.Duration("cook-idle", 30*time.Minute,
+		"finish the current cook after this long without a reading (covers BLE drops/reconnects, so keep it well above a normal reconnect)")
 )
 
 func main() {
@@ -75,7 +75,7 @@ func main() {
 		} else {
 			defer st.Close()
 			mon.SetStore(st, *cookIdle)
-			resumeCook(mon, st, *cookIdle)
+			resumeCook(mon, st)
 			if err := st.Prune(); err != nil {
 				log.Printf("prune cooks: %v", err)
 			}
@@ -98,10 +98,21 @@ func main() {
 	log.Println("shutting down")
 }
 
-// resumeCook restores an in-progress cook on startup. If the open cook has been
-// idle longer than idleTimeout it is finished instead of resumed so an old
-// session is not merged with a new one.
-func resumeCook(mon *monitor.Monitor, st *store.Store, idleTimeout time.Duration) {
+// resumeStaleAfter is how long an open cook may go without a reading before a
+// restart treats it as a finished, separate session rather than resuming it. It
+// is deliberately generous: a BLE wedge or a quick service restart routinely
+// leaves a multi-minute gap mid-cook, and we must not split a long smoke (or
+// stop scanning) over those. Only a cook that has been silent for many hours is
+// assumed to be over.
+const resumeStaleAfter = 12 * time.Hour
+
+// resumeCook restores an in-progress cook on startup and re-enables probe
+// discovery so the monitor reconnects on its own. A cook is resumed (its id,
+// samples, and target kept) unless it has been idle longer than
+// resumeStaleAfter, in which case it is finished and a fresh cook is started on
+// the next reading. Either way discovery is turned back on so a restart never
+// leaves the app idle in the middle of a cook.
+func resumeCook(mon *monitor.Monitor, st *store.Store) {
 	cook, err := st.CurrentOpenCook()
 	if err != nil {
 		log.Printf("resume cook: %v", err)
@@ -115,15 +126,19 @@ func resumeCook(mon *monitor.Monitor, st *store.Store, idleTimeout time.Duration
 		log.Printf("resume cook: %v", err)
 		return
 	}
-	if ok && time.Since(last) > idleTimeout {
+	if ok && time.Since(last) > resumeStaleAfter {
 		if err := st.EndCook(cook.ID, last); err != nil {
 			log.Printf("finish stale cook: %v", err)
 		}
+		mon.EnableDiscovery()
+		log.Printf("previous cook #%d idle %s; starting fresh, scanning for probe",
+			cook.ID, time.Since(last).Round(time.Minute))
 		return
 	}
 	pts, err := st.CookSamples(cook.ID)
 	if err != nil {
 		log.Printf("resume cook samples: %v", err)
+		mon.EnableDiscovery() // still scan even though history failed to load
 		return
 	}
 	mpts := make([]monitor.Point, len(pts))
@@ -131,7 +146,7 @@ func resumeCook(mon *monitor.Monitor, st *store.Store, idleTimeout time.Duration
 		mpts[i] = monitor.Point{At: p.At, TipCelsius: p.TipCelsius, AmbientCelsius: p.AmbientCelsius}
 	}
 	mon.Resume(cook.ID, cook.Name, cook.TargetCelsius, mpts)
-	log.Printf("resumed cook #%d %q with %d samples", cook.ID, cook.Name, len(mpts))
+	log.Printf("resumed cook #%d %q with %d samples; scanning for probe", cook.ID, cook.Name, len(mpts))
 }
 
 // startServer serves the web UI/API. It chooses one of three modes:
