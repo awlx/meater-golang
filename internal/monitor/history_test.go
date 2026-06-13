@@ -90,12 +90,50 @@ func TestHistoricalETAMeatTypeFallback(t *testing.T) {
 }
 
 func TestHistoricalETANoComparableCook(t *testing.T) {
-	// A past cook that only ever reached 70 cannot inform a 95 target.
+	// A past cook that only ever reached 70 cannot inform a 95 target — it
+	// fell well outside the pulled-short tolerance.
 	hc, _ := buildHistCook(synthCook("pork neck", 70, 110), synthSamples(110))
 	hc.maxReach = 72 // pretend it stopped in the stall
 	m := &Monitor{histModel: []histCook{hc}}
 	if eta, n, _, _ := m.historicalETALocked(50, 110, 95, "pork neck"); n != 0 || eta != -1 {
 		t.Fatalf("expected no match, got n=%d eta=%.0f", n, eta)
+	}
+}
+
+// synthSamplesTo is synthSamples but with the final climb ending near maxTip,
+// modelling a cook pulled probe-tender a few degrees below the round target.
+func synthSamplesTo(chamber, maxTip float64) []store.Point {
+	start := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	var pts []store.Point
+	tip := 20.0
+	add := func(mins int, perMin float64) {
+		for i := 0; i < mins; i++ {
+			pts = append(pts, store.Point{At: start, TipCelsius: tip, AmbientCelsius: chamber})
+			start = start.Add(time.Minute)
+			tip += perMin
+		}
+	}
+	add(60, 0.8)  // 20 -> 68
+	add(90, 0.05) // stall to ~72.5
+	mins := int((maxTip - 72.5) / 0.4)
+	add(mins, 0.4) // climb to ~maxTip then the cook is pulled
+	return pts
+}
+
+func TestHistoricalETAExtrapolatesPulledShortCook(t *testing.T) {
+	// A past cook pulled at ~91.7 °C (within tolerance of a 95 °C target) should
+	// still inform the estimate, extrapolating the small final gap.
+	hc, ok := buildHistCook(synthCook("pork neck", 95, 110), synthSamplesTo(110, 91.7))
+	if !ok {
+		t.Fatal("build failed")
+	}
+	if hc.maxReach >= 95 {
+		t.Fatalf("maxReach=%.1f, want < target", hc.maxReach)
+	}
+	m := &Monitor{histModel: []histCook{hc}}
+	eta, n, _, _ := m.historicalETALocked(80, 110, 95, "pork neck")
+	if n != 1 || eta <= 0 {
+		t.Fatalf("expected extrapolated match, got n=%d eta=%.0f", n, eta)
 	}
 }
 

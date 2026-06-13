@@ -46,6 +46,12 @@ const historyModelCooks = 25
 // always tempers a thin or noisy history.
 const historyBlendCap = 0.75
 
+// reachTargetTol is how many °C short of the target a past cook may have been
+// pulled and still inform the estimate (the small final gap is extrapolated
+// from its closing rise rate). Pulled pork is usually taken probe-tender a few
+// degrees below a round target, so without this most history would be unusable.
+const reachTargetTol = 5.0
+
 // ambientWindow is how far back to average the ambient (cook chamber)
 // temperature when using it as the asymptote for the ETA model.
 const ambientWindow = 5 * time.Minute

@@ -20,6 +20,7 @@ type histCook struct {
 	target     float64
 	chamberAvg float64   // mean ambient (cook chamber) over the cook
 	maxReach   float64   // highest tip temperature the cook reached
+	finalRate  float64   // tip rise rate (°C/s) over the last stretch of the rise
 	reach      []reachPt // tip temperature -> elapsed seconds, temp ascending
 }
 
@@ -97,8 +98,33 @@ func buildHistCook(c store.CookMeta, pts []store.Point) (histCook, bool) {
 		target:     c.TargetCelsius,
 		chamberAvg: ambientSum / float64(len(pts)),
 		maxReach:   runMax,
+		finalRate:  finalRise(reach),
 		reach:      reach,
 	}, true
+}
+
+// finalRise estimates the tip rise rate (°C/s) over roughly the last 10 °C of a
+// cook's climb. It is used to extrapolate the small remaining gap when a past
+// cook was pulled a few degrees short of the target (as pulled pork usually is,
+// at probe-tender ~90 °C rather than a round 95 °C).
+func finalRise(reach []reachPt) float64 {
+	n := len(reach)
+	if n < 2 {
+		return 0
+	}
+	hi := reach[n-1]
+	lo := reach[0]
+	for i := n - 2; i >= 0; i-- {
+		lo = reach[i]
+		if hi.temp-reach[i].temp >= 10 {
+			break
+		}
+	}
+	dt := hi.sec - lo.sec
+	if dt <= 0 {
+		return 0
+	}
+	return (hi.temp - lo.temp) / dt
 }
 
 // reachTime returns the elapsed seconds at which the cook first reached temp,
@@ -130,6 +156,23 @@ func (h histCook) reachTime(temp float64) float64 {
 	return h.reach[len(h.reach)-1].sec
 }
 
+// reachToTarget returns the elapsed seconds at which the cook reached target.
+// When the cook was pulled a few degrees short (pulled pork is usually taken at
+// a probe-tender ~90 °C rather than a round target), it extrapolates the small
+// remaining gap using the cook's final rise rate. It returns -1 when the cook
+// fell further than reachTargetTol below the target, or when it stalled at the
+// end (no positive final rate to extrapolate with).
+func (h histCook) reachToTarget(target float64) float64 {
+	if target <= h.maxReach {
+		return h.reachTime(target)
+	}
+	if target-h.maxReach > reachTargetTol || h.finalRate <= 0 {
+		return -1
+	}
+	last := h.reach[len(h.reach)-1]
+	return last.sec + (target-h.maxReach)/h.finalRate
+}
+
 // historicalETALocked estimates the seconds remaining until the tip reaches
 // target by analogy with past cooks: for each comparable cook it measures how
 // long that cook took to climb from the current tip temperature to the target,
@@ -146,13 +189,15 @@ func (m *Monitor) historicalETALocked(tip, chamber, target float64, meatType str
 
 	var all, exact []float64
 	for _, hc := range m.histModel {
-		// The past cook must have climbed through both the current tip and the
-		// target for the interval to be measurable.
-		if hc.maxReach < target || hc.maxReach < tip {
+		// The past cook must have climbed through the current tip, and reached
+		// at (or within tolerance of) the target, for the interval to be
+		// measurable. The tolerance lets a cook pulled a few degrees short
+		// still inform the estimate.
+		if hc.maxReach < tip || target-hc.maxReach > reachTargetTol {
 			continue
 		}
 		tStart := hc.reachTime(tip)
-		tEnd := hc.reachTime(target)
+		tEnd := hc.reachToTarget(target)
 		if tStart < 0 || tEnd < 0 {
 			continue
 		}
