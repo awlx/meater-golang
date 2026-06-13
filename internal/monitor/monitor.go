@@ -37,6 +37,21 @@ const stallRatePerSec = 0.01 / 60
 // of an absurd multi-day figure.
 const etaMaxSeconds = 24 * 60 * 60
 
+// historyModelCooks is how many recent finished cooks to learn the personalised
+// time-to-target estimate from.
+const historyModelCooks = 25
+
+// historyBlendCap is the most weight the learned (historical) estimate may take
+// from the physics model once enough similar past cooks exist, so physics
+// always tempers a thin or noisy history.
+const historyBlendCap = 0.75
+
+// reachTargetTol is how many °C short of the target a past cook may have been
+// pulled and still inform the estimate (the small final gap is extrapolated
+// from its closing rise rate). Pulled pork is usually taken probe-tender a few
+// degrees below a round target, so without this most history would be unusable.
+const reachTargetTol = 5.0
+
 // ambientWindow is how far back to average the ambient (cook chamber)
 // temperature when using it as the asymptote for the ETA model.
 const ambientWindow = 5 * time.Minute
@@ -68,11 +83,16 @@ type Status struct {
 	TargetCelsius     float64   `json:"targetCelsius"`
 	TargetFahrenheit  float64   `json:"targetFahrenheit"`
 	RateCelsiusPerMin float64   `json:"rateCelsiusPerMin"`
-	ETASeconds        float64   `json:"etaSeconds"` // -1 when unknown
+	ETASeconds        float64   `json:"etaSeconds"`     // -1 when unknown
+	ETASource         string    `json:"etaSource"`      // "physics" | "history" | "blend"
+	ETALowSeconds     float64   `json:"etaLowSeconds"`  // -1 when unknown
+	ETAHighSeconds    float64   `json:"etaHighSeconds"` // -1 when unknown
+	ETASamples        int       `json:"etaSamples"`     // past cooks informing the estimate
 	State             string    `json:"state"`
 	HasReading        bool      `json:"hasReading"`
 	Running           bool      `json:"running"` // probe discovery is active
 	CookName          string    `json:"cookName"`
+	MeatType          string    `json:"meatType"`
 	CookID            int64     `json:"cookId"`
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
@@ -99,12 +119,19 @@ type Monitor struct {
 	subs      map[chan Status]struct{}
 
 	// Persistence and cook bookkeeping (st may be nil to disable).
-	st           *store.Store
-	cookID       int64
-	cookName     string
-	pendingName  string // applied to the next cook that auto-starts
-	lastSampleAt time.Time
-	idleTimeout  time.Duration
+	st              *store.Store
+	cookID          int64
+	cookName        string
+	pendingName     string // applied to the next cook that auto-starts
+	meatType        string
+	pendingMeatType string // applied to the next cook that auto-starts
+	lastSampleAt    time.Time
+	idleTimeout     time.Duration
+
+	// histModel holds compact curves learned from past finished cooks, used
+	// to personalise the time-to-target estimate. It is rebuilt off the hot
+	// path by LoadHistory and read under m.mu.
+	histModel []histCook
 
 	// Discovery control. running gates the BLE loop so the app only scans
 	// for the probe after the user presses Start. startCond wakes the loop
@@ -157,6 +184,7 @@ func (m *Monitor) Start() {
 		if err := st.Prune(); err != nil {
 			log.Printf("store: prune: %v", err)
 		}
+		go m.LoadHistory()
 	}
 	m.broadcast(status)
 }
@@ -186,6 +214,7 @@ func (m *Monitor) Stop() {
 		if err := st.Prune(); err != nil {
 			log.Printf("store: prune: %v", err)
 		}
+		go m.LoadHistory()
 	}
 	m.broadcast(status)
 }
@@ -226,13 +255,16 @@ func (m *Monitor) SetStore(st *store.Store, idleTimeout time.Duration) {
 	m.mu.Unlock()
 }
 
-// Resume restores an in-progress cook (its id, name, target, and samples) so a
-// restart keeps the live chart and keeps appending to the same session.
-func (m *Monitor) Resume(cookID int64, name string, target float64, pts []Point) {
+// Resume restores an in-progress cook (its id, name, meat type, target, and
+// samples) so a restart keeps the live chart and keeps appending to the same
+// session.
+func (m *Monitor) Resume(cookID int64, name, meatType string, target float64, pts []Point) {
 	m.mu.Lock()
 	m.cookID = cookID
 	m.cookName = name
 	m.pendingName = name
+	m.meatType = meatType
+	m.pendingMeatType = meatType
 	if target > 0 {
 		m.target = target
 	}
@@ -309,18 +341,22 @@ func (m *Monitor) Update(r meater.Reading) {
 	st := m.st
 	cookID := m.cookID
 	name := m.pendingName
+	meatType := m.pendingMeatType
 	target := m.target
 	m.mu.Unlock()
 
 	if st != nil {
 		if needStart {
-			if id, err := st.StartCook(name, target, now); err != nil {
+			if id, err := st.StartCook(name, meatType, target, now); err != nil {
 				log.Printf("store: start cook: %v", err)
 			} else {
 				m.mu.Lock()
 				m.cookID = id
 				if name != "" {
 					m.cookName = name
+				}
+				if meatType != "" {
+					m.meatType = meatType
 				}
 				m.mu.Unlock()
 				cookID = id
@@ -373,6 +409,24 @@ func (m *Monitor) SetCookName(name string) {
 	m.broadcast(status)
 }
 
+// SetMeatType labels the current (or next) cook with the cut of meat, which the
+// historical estimator uses to prefer past cooks of the same type.
+func (m *Monitor) SetMeatType(meatType string) {
+	m.mu.Lock()
+	m.meatType = meatType
+	m.pendingMeatType = meatType
+	st := m.st
+	cookID := m.cookID
+	status := m.statusLocked()
+	m.mu.Unlock()
+	if st != nil && cookID != 0 {
+		if err := st.SetCookMeatType(cookID, meatType); err != nil {
+			log.Printf("store: set meat type: %v", err)
+		}
+	}
+	m.broadcast(status)
+}
+
 // NewCook ends the current cook (if any) and clears the live chart so the next
 // reading begins a fresh session. The optional name is applied to the new cook.
 func (m *Monitor) NewCook(name string) {
@@ -395,6 +449,7 @@ func (m *Monitor) NewCook(name string) {
 		if err := st.Prune(); err != nil {
 			log.Printf("store: prune: %v", err)
 		}
+		go m.LoadHistory()
 	}
 	m.broadcast(status)
 }
@@ -426,6 +481,7 @@ func (m *Monitor) RunJanitor() {
 				m.cookID = 0
 			}
 			m.mu.Unlock()
+			go m.LoadHistory()
 		}
 	}
 }
@@ -500,7 +556,11 @@ func (m *Monitor) statusLocked() Status {
 		TargetCelsius:    round1(m.target),
 		TargetFahrenheit: round1(celsiusToFahrenheit(m.target)),
 		ETASeconds:       -1,
+		ETASource:        "",
+		ETALowSeconds:    -1,
+		ETAHighSeconds:   -1,
 		CookName:         m.cookName,
+		MeatType:         m.meatType,
 		CookID:           m.cookID,
 		UpdatedAt:        m.updatedAt,
 		State:            StateDisconnected,
@@ -538,17 +598,28 @@ func (m *Monitor) statusLocked() Status {
 	case !ok || ratePerSec <= 1e-4:
 		s.State = StateStalled
 	default:
-		eta := -1.0
+		physEta := -1.0
 		if etaOK && etaRate > stallRatePerSec {
-			eta = etaSeconds(tip, m.target, m.ambientAvgLocked(ambientWindow), etaRate)
+			physEta = etaSeconds(tip, m.target, m.ambientAvgLocked(ambientWindow), etaRate)
 		}
+		// Blend in the estimate learned from past cooks. It carries the cook
+		// through the stall (where physics reads "unknown") and personalises
+		// the figure to this smoker once a few similar cooks exist.
+		chamber := m.ambientAvgLocked(ambientWindow)
+		histEta, nHist, lo, hi := m.historicalETALocked(tip, chamber, m.target, m.meatType)
+		eta, src, elo, ehi := blendETA(physEta, histEta, nHist, lo, hi)
 		if eta < 0 {
-			// Rate too low or so far out the estimate is meaningless: report a
-			// stall (with an unknown ETA) rather than a misleading number.
+			// Rate too low or so far out the estimate is meaningless, and no
+			// comparable past cook: report a stall (with an unknown ETA)
+			// rather than a misleading number.
 			s.State = StateStalled
 		} else {
 			s.State = StateCooking
 			s.ETASeconds = eta
+			s.ETASource = src
+			s.ETALowSeconds = elo
+			s.ETAHighSeconds = ehi
+			s.ETASamples = nHist
 		}
 	}
 	return s

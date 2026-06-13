@@ -49,6 +49,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/cooks/", s.handleCook)
 	s.mux.HandleFunc("/api/cook/new", s.handleCookNew)
 	s.mux.HandleFunc("/api/cook/name", s.handleCookName)
+	s.mux.HandleFunc("/api/cook/meat", s.handleCookMeat)
 	s.mux.HandleFunc("/api/session/start", s.handleSessionStart)
 	s.mux.HandleFunc("/api/session/stop", s.handleSessionStop)
 }
@@ -132,21 +133,44 @@ func (s *Server) handleCookName(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.mon.Status())
 }
 
+// handleCookMeat labels the current cook with the cut of meat, used to match
+// past cooks when estimating the time remaining.
+func (s *Server) handleCookMeat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		MeatType string `json:"meatType"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	s.mon.SetMeatType(strings.TrimSpace(body.MeatType))
+	writeJSON(w, http.StatusOK, s.mon.Status())
+}
+
 // handleSessionStart begins probe discovery and a fresh cook. An optional
-// {"name": ...} sets the cook name before starting.
+// {"name": ..., "meatType": ...} sets the cook name and meat type before
+// starting.
 func (s *Server) handleSessionStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var body struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		MeatType string `json:"meatType"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	if name := strings.TrimSpace(body.Name); name != "" {
 		s.mon.SetCookName(name)
 	}
 	s.mon.Start()
+	if meat := strings.TrimSpace(body.MeatType); meat != "" {
+		s.mon.SetMeatType(meat)
+	}
 	writeJSON(w, http.StatusOK, s.mon.Status())
 }
 
