@@ -58,6 +58,7 @@
 					</div>
 					<form id="cook-name-form" class="cook-name">
 						<input id="cook-name-input" type="text" maxlength="60" placeholder="What are you cooking?" />
+						<input id="cook-meat-input" type="text" maxlength="40" placeholder="Meat type (e.g. pork neck)" />
 						<button type="submit">Save</button>
 					</form>
 				</div>
@@ -76,6 +77,8 @@
 				<div class="card eta">
 					<div class="eta-label">Estimated time remaining</div>
 					<div id="eta" class="eta-value">--:--</div>
+					<div id="eta-end" class="eta-end hidden"></div>
+					<div id="eta-note" class="eta-note hidden"></div>
 					<div id="eta-ready" class="eta-ready hidden">Ready to serve 🎉</div>
 				</div>
 

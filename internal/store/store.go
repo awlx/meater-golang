@@ -24,6 +24,7 @@ type Store struct {
 type CookMeta struct {
 	ID                int64      `json:"id"`
 	Name              string     `json:"name"`
+	MeatType          string     `json:"meatType"`
 	StartedAt         time.Time  `json:"startedAt"`
 	EndedAt           *time.Time `json:"endedAt"`
 	TargetCelsius     float64    `json:"targetCelsius"`
@@ -81,18 +82,46 @@ CREATE TABLE IF NOT EXISTS samples (
 );
 CREATE INDEX IF NOT EXISTS idx_samples_cook ON samples(cook_id, at);
 `
-	_, err := s.db.Exec(schema)
-	if err != nil {
+	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
+	}
+	// meat_type was added later; add it if an older database predates it.
+	if err := s.addColumnIfMissing("cooks", "meat_type", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate meat_type: %w", err)
 	}
 	return nil
 }
 
+// addColumnIfMissing adds a column to a table when it is not already present,
+// so repeated startups on an existing database are safe (SQLite has no
+// ADD COLUMN IF NOT EXISTS).
+func (s *Store) addColumnIfMissing(table, column, decl string) error {
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, decl))
+	return err
+}
+
 // StartCook inserts a new cook and returns its id.
-func (s *Store) StartCook(name string, targetCelsius float64, at time.Time) (int64, error) {
+func (s *Store) StartCook(name, meatType string, targetCelsius float64, at time.Time) (int64, error) {
 	res, err := s.db.Exec(
-		`INSERT INTO cooks(name, target_celsius, started_at) VALUES(?, ?, ?)`,
-		name, targetCelsius, at.UnixMilli(),
+		`INSERT INTO cooks(name, meat_type, target_celsius, started_at) VALUES(?, ?, ?, ?)`,
+		name, meatType, targetCelsius, at.UnixMilli(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("start cook: %w", err)
@@ -132,6 +161,12 @@ func (s *Store) RenameCook(cookID int64, name string) error {
 	return err
 }
 
+// SetCookMeatType sets a cook's meat type label.
+func (s *Store) SetCookMeatType(cookID int64, meatType string) error {
+	_, err := s.db.Exec(`UPDATE cooks SET meat_type = ? WHERE id = ?`, meatType, cookID)
+	return err
+}
+
 // SetCookTarget updates a cook's target temperature.
 func (s *Store) SetCookTarget(cookID int64, targetCelsius float64) error {
 	_, err := s.db.Exec(`UPDATE cooks SET target_celsius = ? WHERE id = ?`, targetCelsius, cookID)
@@ -141,7 +176,7 @@ func (s *Store) SetCookTarget(cookID int64, targetCelsius float64) error {
 // CurrentOpenCook returns the most recent cook with no end time, or nil.
 func (s *Store) CurrentOpenCook() (*CookMeta, error) {
 	row := s.db.QueryRow(
-		`SELECT id, name, target_celsius, started_at, ended_at, max_tip_celsius, max_ambient_celsius
+		`SELECT id, name, meat_type, target_celsius, started_at, ended_at, max_tip_celsius, max_ambient_celsius
 		 FROM cooks WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
 	)
 	m, err := scanCook(row)
@@ -172,7 +207,7 @@ func (s *Store) LastSampleAt(cookID int64) (at time.Time, ok bool, err error) {
 // one, with a per-cook sample count.
 func (s *Store) ListCooks(limit int) ([]CookMeta, error) {
 	rows, err := s.db.Query(
-		`SELECT c.id, c.name, c.target_celsius, c.started_at, c.ended_at,
+		`SELECT c.id, c.name, c.meat_type, c.target_celsius, c.started_at, c.ended_at,
 		        c.max_tip_celsius, c.max_ambient_celsius,
 		        (SELECT COUNT(*) FROM samples s WHERE s.cook_id = c.id) AS n
 		 FROM cooks c ORDER BY c.started_at DESC LIMIT ?`,
@@ -190,7 +225,7 @@ func (s *Store) ListCooks(limit int) ([]CookMeta, error) {
 			started int64
 			ended   sql.NullInt64
 		)
-		if err := rows.Scan(&m.ID, &m.Name, &m.TargetCelsius, &started, &ended,
+		if err := rows.Scan(&m.ID, &m.Name, &m.MeatType, &m.TargetCelsius, &started, &ended,
 			&m.MaxTipCelsius, &m.MaxAmbientCelsius, &m.Samples); err != nil {
 			return nil, err
 		}
@@ -200,6 +235,43 @@ func (s *Store) ListCooks(limit int) ([]CookMeta, error) {
 			m.EndedAt = &t
 		} else {
 			m.Active = true
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// FinishedCooks returns completed cooks (newest first) with a sample count,
+// used to learn a personalised time-to-target estimate from past cooks.
+func (s *Store) FinishedCooks(limit int) ([]CookMeta, error) {
+	rows, err := s.db.Query(
+		`SELECT c.id, c.name, c.meat_type, c.target_celsius, c.started_at, c.ended_at,
+		        c.max_tip_celsius, c.max_ambient_celsius,
+		        (SELECT COUNT(*) FROM samples s WHERE s.cook_id = c.id) AS n
+		 FROM cooks c WHERE c.ended_at IS NOT NULL
+		 ORDER BY c.started_at DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("finished cooks: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CookMeta
+	for rows.Next() {
+		var (
+			m       CookMeta
+			started int64
+			ended   sql.NullInt64
+		)
+		if err := rows.Scan(&m.ID, &m.Name, &m.MeatType, &m.TargetCelsius, &started, &ended,
+			&m.MaxTipCelsius, &m.MaxAmbientCelsius, &m.Samples); err != nil {
+			return nil, err
+		}
+		m.StartedAt = time.UnixMilli(started)
+		if ended.Valid {
+			t := time.UnixMilli(ended.Int64)
+			m.EndedAt = &t
 		}
 		out = append(out, m)
 	}
@@ -260,7 +332,7 @@ func scanCook(row scanner) (*CookMeta, error) {
 		started int64
 		ended   sql.NullInt64
 	)
-	if err := row.Scan(&m.ID, &m.Name, &m.TargetCelsius, &started, &ended,
+	if err := row.Scan(&m.ID, &m.Name, &m.MeatType, &m.TargetCelsius, &started, &ended,
 		&m.MaxTipCelsius, &m.MaxAmbientCelsius); err != nil {
 		return nil, err
 	}

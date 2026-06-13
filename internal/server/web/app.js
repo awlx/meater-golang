@@ -29,6 +29,10 @@ const state = {
 	unit: localStorage.getItem('unit') || 'C',
 	last: null,
 	etaSeconds: -1,
+	etaSource: '', // 'physics' | 'history' | 'blend'
+	etaLow: -1, // historical range low (seconds), -1 unknown
+	etaHigh: -1, // historical range high (seconds), -1 unknown
+	etaSamples: 0, // past cooks informing the estimate
 	etaTickedAt: 0,
 	series: [], // { t: ms, tip: °C, amb: °C }
 	alert: loadAlertConfig(),
@@ -39,6 +43,7 @@ const state = {
 	viewSeries: [], // points of the cook being viewed
 	viewMeta: null, // { name, startedAt } of the cook being viewed
 	cookName: '', // last cook name seen from the server
+	meatType: '', // last meat type seen from the server
 };
 
 // Chart plot geometry from the last draw, used for pointer hit-testing.
@@ -160,6 +165,10 @@ function render(status) {
 
 	// ETA.
 	state.etaSeconds = status.etaSeconds;
+	state.etaSource = status.etaSource || '';
+	state.etaLow = (status.etaLowSeconds === undefined) ? -1 : status.etaLowSeconds;
+	state.etaHigh = (status.etaHighSeconds === undefined) ? -1 : status.etaHighSeconds;
+	state.etaSamples = status.etaSamples || 0;
 	state.etaTickedAt = Date.now();
 	updateEta();
 
@@ -182,6 +191,11 @@ function render(status) {
 	if (nameInput && document.activeElement !== nameInput) {
 		nameInput.value = state.cookName;
 	}
+	state.meatType = status.meatType || '';
+	const meatInput = el('cook-meat-input');
+	if (meatInput && document.activeElement !== meatInput) {
+		meatInput.value = state.meatType;
+	}
 
 	// Chart + ambient alerts.
 	if (status.hasReading) {
@@ -195,21 +209,53 @@ function render(status) {
 function updateEta() {
 	const etaEl = el('eta');
 	const readyEl = el('eta-ready');
+	const endEl = el('eta-end');
+	const noteEl = el('eta-note');
 	const s = state.last && state.last.state;
 
 	if (s === 'ready') {
 		etaEl.textContent = 'Done';
 		readyEl.classList.remove('hidden');
+		endEl.classList.add('hidden');
+		noteEl.classList.add('hidden');
 		return;
 	}
 	readyEl.classList.add('hidden');
 
 	if (state.etaSeconds < 0 || !state.last || !state.last.hasReading) {
 		etaEl.textContent = '--:--';
+		endEl.classList.add('hidden');
+		noteEl.classList.add('hidden');
 		return;
 	}
 	const elapsed = (Date.now() - state.etaTickedAt) / 1000;
-	etaEl.textContent = fmtDuration(state.etaSeconds - elapsed);
+	const remaining = Math.max(0, state.etaSeconds - elapsed);
+	etaEl.textContent = fmtDuration(remaining);
+
+	// Estimated end (clock) time, e.g. "≈ ready 19:30".
+	const endAt = new Date(Date.now() + remaining * 1000);
+	endEl.textContent = '≈ ready ' + fmtClock(endAt);
+	endEl.classList.remove('hidden');
+
+	// Source / confidence note: when the estimate is informed by past cooks,
+	// show how many and a clock-time range so the figure is honest.
+	if ((state.etaSource === 'history' || state.etaSource === 'blend') && state.etaSamples > 0) {
+		let note = `based on ${state.etaSamples} past cook${state.etaSamples === 1 ? '' : 's'}`;
+		if (state.etaLow >= 0 && state.etaHigh >= 0 && state.etaHigh - state.etaLow > 120) {
+			const lo = new Date(state.etaTickedAt + state.etaLow * 1000);
+			const hi = new Date(state.etaTickedAt + state.etaHigh * 1000);
+			note += ` · ${fmtClock(lo)}–${fmtClock(hi)}`;
+		}
+		noteEl.textContent = note;
+		noteEl.classList.remove('hidden');
+	} else {
+		noteEl.classList.add('hidden');
+	}
+}
+
+// fmtClock renders a Date as a short local wall-clock time like "19:30".
+function fmtClock(d) {
+	return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function toggleUnit() {
@@ -511,11 +557,17 @@ function getCss(varName, fallback) {
 
 async function saveCookName() {
 	const name = el('cook-name-input').value.trim();
+	const meatType = el('cook-meat-input').value.trim();
 	try {
 		await fetch('/api/cook/name', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ name }),
+		});
+		await fetch('/api/cook/meat', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ meatType }),
 		});
 		loadCooks();
 	} catch (err) {
@@ -523,15 +575,16 @@ async function saveCookName() {
 	}
 }
 
-// Start probe discovery and a fresh cook. The current name field is sent so the
-// new cook is created with it.
+// Start probe discovery and a fresh cook. The current name and meat type fields
+// are sent so the new cook is created with them.
 async function startSession() {
 	const name = el('cook-name-input').value.trim();
+	const meatType = el('cook-meat-input').value.trim();
 	try {
 		await fetch('/api/session/start', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ name }),
+			body: JSON.stringify({ name, meatType }),
 		});
 		state.series = [];
 		state.viewingCookId = null;

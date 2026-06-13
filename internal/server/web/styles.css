@@ -334,6 +334,20 @@ body {
 	margin-top: 6px;
 }
 
+.eta-end {
+	color: var(--text);
+	font-size: 15px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	margin-top: 2px;
+}
+
+.eta-note {
+	color: var(--muted);
+	font-size: 12px;
+	margin-top: 4px;
+}
+
 .eta-ready {
 	color: var(--good);
 	font-weight: 700;
@@ -484,12 +498,13 @@ body {
 
 .cook-name {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 8px;
 	margin-top: 12px;
 }
 
 .cook-name input {
-	flex: 1;
+	flex: 1 1 160px;
 	min-width: 0;
 	background: var(--card-2);
 	border: 1px solid var(--line);

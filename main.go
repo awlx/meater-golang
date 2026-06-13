@@ -76,6 +76,7 @@ func main() {
 			defer st.Close()
 			mon.SetStore(st, *cookIdle)
 			resumeCook(mon, st)
+			mon.LoadHistory() // learn the time-to-target model from past cooks
 			if err := st.Prune(); err != nil {
 				log.Printf("prune cooks: %v", err)
 			}
@@ -145,7 +146,7 @@ func resumeCook(mon *monitor.Monitor, st *store.Store) {
 	for i, p := range pts {
 		mpts[i] = monitor.Point{At: p.At, TipCelsius: p.TipCelsius, AmbientCelsius: p.AmbientCelsius}
 	}
-	mon.Resume(cook.ID, cook.Name, cook.TargetCelsius, mpts)
+	mon.Resume(cook.ID, cook.Name, cook.MeatType, cook.TargetCelsius, mpts)
 	log.Printf("resumed cook #%d %q with %d samples; scanning for probe", cook.ID, cook.Name, len(mpts))
 }
 
