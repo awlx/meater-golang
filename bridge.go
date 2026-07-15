@@ -39,12 +39,25 @@ import (
 const (
 	bridgeTempPrefix   = "T "
 	bridgeStatusPrefix = "S "
+)
 
-	// bridgeStaleAfter mirrors the local BLE path: if the probe stops
-	// producing readings we tear the link down and redial rather than sit on a
-	// silent socket. The ESP32 keeps the TCP connection open across probe
-	// dropouts, so silence here means the probe is gone, not the network.
-	bridgeStaleAfter = 20 * time.Second
+// Link timings. Vars rather than consts so tests can shorten them; nothing
+// outside tests should assign to them.
+var (
+	// bridgeStaleAfter bounds silence on the *link*, not gaps between readings.
+	//
+	// The distinction matters: a probe that isn't in range yet produces no
+	// readings for minutes at a time, which is normal, and tearing the socket
+	// down over it would abort the scan the bridge is running on our behalf and
+	// livelock in redials. So the bridge instead guarantees a line at least
+	// every ~10s -- a reading, a status change, or a "#" keepalive while it
+	// scans -- and any of them proves the board is alive. Silence this long
+	// means the board or the network is wedged, which redialing can actually
+	// fix.
+	bridgeStaleAfter = 30 * time.Second
+
+	// bridgeWatchdogTick is how often that silence is checked.
+	bridgeWatchdogTick = 5 * time.Second
 
 	// bridgeRedialDelay paces reconnect attempts when the board is rebooting,
 	// being reflashed, or simply not powered yet.
@@ -127,7 +140,7 @@ func streamBridge(conn net.Conn, mon *monitor.Monitor, stop <-chan struct{}) boo
 				return
 			case <-done:
 				return
-			case <-time.After(5 * time.Second):
+			case <-time.After(bridgeWatchdogTick):
 				if time.Since(time.Unix(0, lastUpdate.Load())) > bridgeStaleAfter {
 					stalled <- true
 					_ = conn.Close()
@@ -140,6 +153,12 @@ func streamBridge(conn net.Conn, mon *monitor.Monitor, stop <-chan struct{}) boo
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+
+		// Any line at all proves the board is still alive and working, so it
+		// resets the watchdog -- including the keepalives it sends while
+		// scanning for an absent probe.
+		lastUpdate.Store(time.Now().UnixNano())
+
 		switch {
 		case strings.HasPrefix(line, bridgeTempPrefix):
 			reading, err := decodeBridgeTemp(strings.TrimPrefix(line, bridgeTempPrefix))
@@ -147,25 +166,22 @@ func streamBridge(conn net.Conn, mon *monitor.Monitor, stop <-chan struct{}) boo
 				log.Printf("bridge decode error: %v", err)
 				continue
 			}
-			lastUpdate.Store(time.Now().UnixNano())
 			mon.Update(reading)
 
 		case strings.HasPrefix(line, bridgeStatusPrefix):
 			switch status := strings.TrimPrefix(line, bridgeStatusPrefix); status {
 			case "connected":
 				log.Println("bridge reports probe connected, streaming temperatures")
-				// Don't let the probe's scan time count against staleness.
-				lastUpdate.Store(time.Now().UnixNano())
 				mon.SetConnected(true)
 			case "disconnected":
-				log.Println("bridge reports probe disconnected, it will rescan")
+				log.Println("bridge reports probe not connected, it will keep scanning")
 				mon.SetConnected(false)
 			default:
 				log.Printf("bridge: unknown status %q", status)
 			}
 
 		case line == "" || strings.HasPrefix(line, "#"):
-			// Banner or keep-alive comment; ignore.
+			// Banner or scan keepalive; its only job was to reset the watchdog.
 
 		default:
 			log.Printf("bridge: unrecognised line %q", line)

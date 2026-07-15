@@ -196,6 +196,15 @@ in a signed app bundle. Importing `tinygo.org/x/bluetooth` is enough to trigger
 it, so without the tag the app dies at startup on macOS even in `-bridge` or
 `-mock` mode, where Bluetooth is never used.
 
+The same applies to the tests — on macOS, use:
+
+```sh
+go test -tags nobluetooth ./...
+```
+
+Plain `go test ./...` aborts in the root package there for the same reason (its
+test binary links CoreBluetooth). Linux and CI are unaffected.
+
 ## HTTPS / TLS is optional
 
 By default the app serves **plain HTTP** — that's perfectly fine on a trusted
