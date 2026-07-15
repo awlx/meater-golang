@@ -6,9 +6,9 @@
 // they make excellent PoE-powered BLE radios: the board sits in range of the
 // grill on an Ethernet drop while this program runs on a real host elsewhere.
 //
-// The bridge firmware forwards the probe's *raw* characteristic payload rather
-// than decoded temperatures, so meater.ParseTemperature stays the single source
-// of truth for the wire format and its calibration.
+// The bridge firmware (see firmware/) forwards the probe's *raw* characteristic
+// payload rather than decoded temperatures, so meater.ParseTemperature stays the
+// single source of truth for the wire format and its calibration.
 package main
 
 import (

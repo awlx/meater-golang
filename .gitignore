@@ -8,6 +8,9 @@
 # ACME / TLS cache
 /acme-certs/
 
+# PlatformIO build output and downloaded toolchains (firmware/)
+.pio/
+
 # SQLite cook-history database (created at runtime)
 *.db
 *.db-wal

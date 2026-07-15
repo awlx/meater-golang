@@ -169,10 +169,11 @@ it holds the BLE link and forwards the probe's readings over Ethernet.
 MEATER ~BLE~> ESP32-POE-ISO ──PoE/Ethernet──> meater-golang (dashboard, history, ETA)
 ```
 
-Firmware and wiring: **[fjaeckel/meater-bridge](https://github.com/fjaeckel/meater-bridge)**.
+Firmware, wiring and troubleshooting: **[`firmware/`](firmware/)**.
 
 ```sh
-go build -tags nobluetooth -o meater .
+cd firmware && pio run -t upload    # flash the board, note the IP it prints
+cd .. && go build -tags nobluetooth -o meater .
 ./meater -bridge 192.168.1.42:9000
 ```
 
@@ -246,6 +247,7 @@ automatically.
 | `internal/server/server.go`         | HTTP routes, JSON API, and the SSE stream.               |
 | `internal/server/web/`              | Static dashboard (HTML/CSS/JS, PWA manifest, worker).    |
 | `bluez_linux.go` / `bluez_other.go` | Platform helpers for BlueZ.                              |
+| `firmware/`                         | ESP32 bridge firmware (PlatformIO/C++, not part of the Go module). |
 | `deploy/meater.service`             | Sample systemd unit.                                     |
 | `Dockerfile` / `docker-compose.yml` | Container build and ready-to-run Compose setup.          |
 
