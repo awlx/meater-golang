@@ -1,0 +1,100 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "MEATER Monitor",
+        "description": "Enter the address of your self-hosted meater-golang instance. This is the same host and port you open the web dashboard on.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "ssl": "Uses HTTPS",
+          "verify_ssl": "Verify the TLS certificate"
+        },
+        "data_description": {
+          "host": "Hostname or IP address, for example meater.local or 192.168.1.20",
+          "verify_ssl": "Turn this off only if the monitor uses a self-signed certificate"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the monitor at that address. Check that it is running and that the host and port match the web dashboard.",
+      "invalid_response": "That address answered, but it is not a MEATER Monitor."
+    },
+    "abort": {
+      "already_configured": "This MEATER Monitor is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "MEATER Monitor options",
+        "data": {
+          "scan_interval": "Poll interval"
+        },
+        "data_description": {
+          "scan_interval": "How often to read the monitor. Lower is more responsive on fast cooks such as steak, at the cost of more history recorded."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tip_temperature": { "name": "Internal temperature" },
+      "ambient_temperature": { "name": "Ambient temperature" },
+      "target_temperature": { "name": "Target temperature" },
+      "progress": { "name": "Cook progress" },
+      "time_to_target": { "name": "Time to target" },
+      "ready_at": { "name": "Ready at" },
+      "rise_rate": { "name": "Rise rate" },
+      "cook_name": { "name": "Cook name" },
+      "meat_type": { "name": "Meat type" },
+      "cook_started": { "name": "Cook started" },
+      "cook_elapsed": { "name": "Cook elapsed" },
+      "eta_low": { "name": "Estimate low" },
+      "eta_high": { "name": "Estimate high" },
+      "eta_samples": { "name": "Estimate history samples" },
+      "cook_id": { "name": "Cook ID" },
+      "last_update": { "name": "Last update" },
+      "state": {
+        "name": "Cook state",
+        "state": {
+          "idle": "Idle",
+          "disconnected": "Disconnected",
+          "waiting": "Waiting for reading",
+          "cooking": "Cooking",
+          "stalled": "Stalled",
+          "ready": "Ready"
+        }
+      },
+      "eta_source": {
+        "name": "Estimate source",
+        "state": {
+          "physics": "Physics model",
+          "history": "Past cooks",
+          "blend": "Blended",
+          "none": "Unavailable"
+        }
+      }
+    },
+    "binary_sensor": {
+      "ready": { "name": "Ready" },
+      "cooking": { "name": "Cook session" },
+      "probe_connected": { "name": "Probe connected" },
+      "stalled": { "name": "Stalled" }
+    },
+    "number": {
+      "target": { "name": "Target temperature" }
+    },
+    "switch": {
+      "session": { "name": "Cook session" }
+    }
+  },
+  "exceptions": {
+    "set_target_failed": {
+      "message": "Could not set the target temperature: {error}"
+    },
+    "session_failed": {
+      "message": "Could not {action} the cook session: {error}"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 // Package server exposes the probe monitor over HTTP: a JSON status API, a
 // Server-Sent Events stream for live updates, an endpoint to set the target
-// temperature, and the embedded single-page web UI.
+// temperature, a Prometheus metrics endpoint, and the embedded single-page web
+// UI.
 package server
 
 import (
@@ -8,11 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/awlx/meater-golang/internal/metrics"
 	"github.com/awlx/meater-golang/internal/monitor"
 	"github.com/awlx/meater-golang/internal/store"
 )
@@ -52,6 +55,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/cook/meat", s.handleCookMeat)
 	s.mux.HandleFunc("/api/session/start", s.handleSessionStart)
 	s.mux.HandleFunc("/api/session/stop", s.handleSessionStop)
+
+	// Prometheus scrape endpoint. Registration only fails on a duplicate or
+	// inconsistent collector, which would be a programming error rather than
+	// anything an operator can fix, so serve a 500 there instead of taking the
+	// whole web UI down with it.
+	h, err := metrics.Handler(s.mon, s.st)
+	if err != nil {
+		log.Printf("metrics disabled: %v", err)
+		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "metrics unavailable", http.StatusInternalServerError)
+		})
+	}
+	s.mux.Handle("/metrics", h)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

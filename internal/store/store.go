@@ -303,6 +303,30 @@ func (s *Store) CookSamples(cookID int64) ([]Point, error) {
 	return out, rows.Err()
 }
 
+// Stats summarises what the database currently holds, for telemetry.
+type Stats struct {
+	Cooks         int
+	FinishedCooks int
+	Samples       int
+}
+
+// Stats counts the retained cooks and samples. Counting samples is a full scan,
+// so callers that poll (the metrics collector) should cache the result rather
+// than run it on every request: the store keeps a single connection, and a scan
+// of a long cook's samples would otherwise stall the writer appending readings.
+func (s *Store) Stats() (Stats, error) {
+	var st Stats
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*), COUNT(ended_at) FROM cooks`,
+	).Scan(&st.Cooks, &st.FinishedCooks); err != nil {
+		return Stats{}, fmt.Errorf("stats cooks: %w", err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM samples`).Scan(&st.Samples); err != nil {
+		return Stats{}, fmt.Errorf("stats samples: %w", err)
+	}
+	return st, nil
+}
+
 // Prune deletes finished cooks beyond the most recent keepEndedCooks, along
 // with their samples. Active (open) cooks are always kept.
 func (s *Store) Prune() error {
