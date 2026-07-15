@@ -11,3 +11,6 @@ docker-compose*.yml
 *.md
 docs/
 .DS_Store
+
+# ESP32 bridge firmware: not part of the server image.
+firmware/

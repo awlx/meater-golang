@@ -147,6 +147,7 @@ sudo setcap 'cap_net_raw,cap_net_admin+eip' /opt/meater/meater
 | `-tls-key`          | (none)       | Path to a TLS private key file (use with `-tls-cert`).                           |
 | `-target`           | `63`         | Default target tip temperature in Celsius.                                       |
 | `-mock`             | `false`      | Simulate a probe instead of using Bluetooth (for UI testing).                    |
+| `-bridge`           | (none)       | Read the probe from a networked ESP32 BLE bridge at `host:port` instead of a local adapter. |
 | `-db`               | `meater.db`  | SQLite file for cook history (empty string disables persistence).                |
 | `-cook-idle`        | `30m`        | Finish the current cook after this long without a reading (covers BLE drops/reconnects). |
 
@@ -156,6 +157,54 @@ the probe and it will connect as soon as the probe begins advertising:
 ```sh
 go run . -addr AA:BB:CC:DD:EE:FF -scan-window 12s
 ```
+
+## Remote probe over a networked ESP32 bridge (`-bridge`)
+
+The host running this program has to be within Bluetooth range of the probe,
+which is awkward when the grill is outside and the server is in a cupboard. A
+cheap PoE ESP32 (e.g. an **Olimex ESP32-POE-ISO**) can act as the radio instead:
+it holds the BLE link and forwards the probe's readings over Ethernet.
+
+```
+MEATER ~BLE~> ESP32-POE-ISO ──PoE/Ethernet──> meater-golang (dashboard, history, ETA)
+```
+
+Firmware, wiring and troubleshooting: **[`firmware/`](firmware/)**.
+
+```sh
+cd firmware && pio run -t upload    # flash the board, note the IP it prints
+cd .. && go build -tags nobluetooth -o meater .
+./meater -bridge 192.168.1.42:9000
+```
+
+The bridge is a peer of the local BLE source, not a replacement: `Start` dials
+the board, `Stop` hangs up, and everything downstream (decoding, history, ETA,
+alerts) is identical. The board forwards the probe's **raw** payload, so
+`internal/meater.ParseTemperature` remains the only decoder in the project and
+the two transports cannot drift apart.
+
+> **Note:** the ESP32 cannot run this program itself — it is a microcontroller
+> with no OS, and `modernc.org/sqlite`, BlueZ/D-Bus and `net/http` all need a
+> POSIX host. It is the radio, not the computer.
+
+### Building without a local Bluetooth stack
+
+`-tags nobluetooth` compiles out the local BLE backend, leaving `-bridge` and
+`-mock`. It is optional on Linux, but **required on macOS**: macOS aborts
+(SIGABRT, a few hundred ms after startup, with no error message) any long-lived
+unsigned binary that links CoreBluetooth without a Bluetooth usage description
+in a signed app bundle. Importing `tinygo.org/x/bluetooth` is enough to trigger
+it, so without the tag the app dies at startup on macOS even in `-bridge` or
+`-mock` mode, where Bluetooth is never used.
+
+The same applies to the tests — on macOS, use:
+
+```sh
+go test -tags nobluetooth ./...
+```
+
+Plain `go test ./...` aborts in the root package there for the same reason (its
+test binary links CoreBluetooth). Linux and CI are unaffected.
 
 ## HTTPS / TLS is optional
 
@@ -190,12 +239,15 @@ automatically.
 
 | Path                                | Purpose                                                  |
 | ----------------------------------- | -------------------------------------------------------- |
-| `main.go`                           | BLE scan/connect/subscribe loop, HTTP(S) server startup. |
+| `main.go`                           | Flags, source selection, HTTP(S) server startup.          |
+| `ble.go` / `ble_disabled.go`        | Local BLE source: scan/connect/subscribe. Compiled out by `-tags nobluetooth`. |
+| `bridge.go`                         | Remote source: reads the probe from a networked ESP32 BLE bridge (`-bridge`). |
 | `internal/meater/meater.go`         | BLE UUIDs and the temperature payload decoder.           |
 | `internal/monitor/monitor.go`       | Thread-safe state, history, ETA, and SSE fan-out.        |
 | `internal/server/server.go`         | HTTP routes, JSON API, and the SSE stream.               |
 | `internal/server/web/`              | Static dashboard (HTML/CSS/JS, PWA manifest, worker).    |
 | `bluez_linux.go` / `bluez_other.go` | Platform helpers for BlueZ.                              |
+| `firmware/`                         | ESP32 bridge firmware (PlatformIO/C++, not part of the Go module). |
 | `deploy/meater.service`             | Sample systemd unit.                                     |
 | `Dockerfile` / `docker-compose.yml` | Container build and ready-to-run Compose setup.          |
 
