@@ -20,6 +20,10 @@
 # Local screenshots scratch (keep docs/screenshot.png tracked)
 # (nothing excluded here by default)
 
+# Python bytecode from the Home Assistant integration (custom_components/)
+__pycache__/
+*.py[cod]
+
 # OS / editor cruft
 .DS_Store
 *.swp

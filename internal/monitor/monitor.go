@@ -94,6 +94,10 @@ type Status struct {
 	CookName          string    `json:"cookName"`
 	MeatType          string    `json:"meatType"`
 	CookID            int64     `json:"cookId"`
+	StartTipCelsius   float64   `json:"startTipCelsius"` // tip at the cook's first reading
+	ProgressPercent   float64   `json:"progressPercent"` // 0-100; -1 when unknown
+	CookStartedAt     time.Time `json:"cookStartedAt"`   // zero when no cook is open
+	ElapsedSeconds    float64   `json:"elapsedSeconds"`  // -1 when no cook is open
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
@@ -562,8 +566,18 @@ func (m *Monitor) statusLocked() Status {
 		CookName:         m.cookName,
 		MeatType:         m.meatType,
 		CookID:           m.cookID,
+		ProgressPercent:  -1,
+		ElapsedSeconds:   -1,
 		UpdatedAt:        m.updatedAt,
 		State:            StateDisconnected,
+	}
+
+	// Cook-session facts hold regardless of the live link: a probe that has
+	// dropped mid-cook is still in a cook that started when it started.
+	if len(m.history) > 0 {
+		s.CookStartedAt = m.history[0].at
+		s.StartTipCelsius = round1(m.history[0].reading.TipCelsius)
+		s.ElapsedSeconds = round1(time.Since(m.history[0].at).Seconds())
 	}
 
 	if !m.running {
@@ -583,6 +597,7 @@ func (m *Monitor) statusLocked() Status {
 	s.TipFahrenheit = round1(m.latest.TipFahrenheit())
 	s.AmbientCelsius = round1(m.latest.AmbientCelsius)
 	s.AmbientFahrenheit = round1(m.latest.AmbientFahrenheit())
+	s.ProgressPercent = m.progressLocked(tip)
 
 	ratePerSec, ok := m.rateLocked()
 	s.RateCelsiusPerMin = round2(ratePerSec * 60)
@@ -623,6 +638,28 @@ func (m *Monitor) statusLocked() Status {
 		}
 	}
 	return s
+}
+
+// progressLocked reports how far the cook has climbed from the temperature it
+// started at toward the target, as a 0-100 percentage, or -1 when there is
+// nothing meaningful to measure.
+//
+// Progress is deliberately measured from the cook's starting temperature rather
+// than from zero: a steak going 20 °C → 55 °C is half done at 37 °C, but naive
+// tip/target arithmetic would call it two-thirds done before it hit the pan.
+// The caller must hold at least a read lock.
+func (m *Monitor) progressLocked(tip float64) float64 {
+	if len(m.history) == 0 {
+		return -1
+	}
+	start := m.history[0].reading.TipCelsius
+	span := m.target - start
+	// A target at or below where the cook began (a probe put in already hot, or
+	// a target dialled down past the current reading) has no climb to measure.
+	if span <= 0 {
+		return -1
+	}
+	return round1(clampF((tip-start)/span, 0, 1) * 100)
 }
 
 // etaSeconds estimates the seconds until the tip reaches target using Newton's
