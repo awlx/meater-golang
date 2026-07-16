@@ -662,10 +662,12 @@ async function loadCooks() {
 			if (state.viewingCookId === c.id) li.classList.add('cook-viewing');
 			const name = (c.name && c.name.trim()) || 'Cook #' + c.id;
 			const maxTip = Math.round(cToUnit(c.maxTipCelsius));
+			const meatType = c.meatType && c.meatType.trim();
+			const meta = fmtCookSpan(c) + (meatType ? ' · ' + escapeHtml(meatType) : '');
 			li.innerHTML = `
 				<div class="cook-main">
 					<span class="cook-item-name">${escapeHtml(name)}</span>
-					<span class="cook-meta">${fmtCookSpan(c)}</span>
+					<span class="cook-meta">${meta}</span>
 				</div>
 				<div class="cook-side">
 					<span class="cook-max">max ${maxTip}°${state.unit}</span>
