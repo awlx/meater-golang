@@ -642,6 +642,22 @@ function fmtCookSpan(c) {
 	return `${day} ${t}${dur}`;
 }
 
+// updateMeatTypeOptions refreshes the <datalist> backing the meat-type input
+// with the distinct meat types seen across saved cooks, so picking a past
+// value (for matching ETA history) is one click, while typing a new one
+// still works since it's a plain text input under the hood.
+function updateMeatTypeOptions(cooks) {
+	const datalist = el('meat-type-options');
+	if (!datalist) return;
+	const seen = new Set();
+	for (const c of cooks || []) {
+		const t = c.meatType && c.meatType.trim();
+		if (t) seen.add(t);
+	}
+	const types = Array.from(seen).sort((a, b) => a.localeCompare(b));
+	datalist.innerHTML = types.map(t => `<option value="${escapeHtml(t)}"></option>`).join('');
+}
+
 async function loadCooks() {
 	const list = el('cooks-list');
 	if (!list) return;
@@ -649,6 +665,7 @@ async function loadCooks() {
 		const res = await fetch('/api/cooks');
 		const cooks = await res.json();
 		list.innerHTML = '';
+		updateMeatTypeOptions(cooks);
 		if (!cooks || cooks.length === 0) {
 			const li = document.createElement('li');
 			li.className = 'cooks-empty';
