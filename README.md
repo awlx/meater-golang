@@ -69,7 +69,7 @@ Press `Ctrl+C` to disconnect and exit.
 **Docker** — try the UI with no probe needed:
 
 ```sh
-docker build -t meater . && docker run --rm -p 8080:8080 meater -mock -http :8080
+docker run --rm -p 8080:8080 ghcr.io/awlx/meater:latest -mock -http :8080
 ```
 
 **Binary + systemd**:
