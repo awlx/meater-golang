@@ -1,11 +1,14 @@
-// MEATER BLE -> Ethernet bridge for the Olimex ESP32-POE-ISO.
+// MEATER BLE -> TCP bridge, running on either the Olimex ESP32-POE-ISO (over
+// PoE Ethernet) or a generic ESP32 dev board (over WiFi, selected by the
+// BRIDGE_WIFI build flag -- see platformio.ini).
 //
 // Why this exists: meater-golang is a normal Go program (SQLite, net/http,
-// BlueZ) and cannot run on an ESP32 -- there is no OS to run it on. But the
-// ESP32-POE-ISO is an ideal *radio*: PoE means one cable to a spot in BLE range
-// of the grill. So the board does exactly one job -- hold the GATT link to the
-// probe and forward its notifications over TCP -- while the Go program does the
-// decoding, history, ETA and dashboard on a real host.
+// BlueZ) and cannot run on an ESP32 -- there is no OS to run it on. But an
+// ESP32 is an ideal *radio*: it can sit within BLE range of the grill wherever
+// that is, on one Ethernet cable or over WiFi. So the board does exactly one
+// job -- hold the GATT link to the probe and forward its notifications over
+// TCP -- while the Go program does the decoding, history, ETA and dashboard on
+// a real host.
 //
 // Deliberately NOT decoded here. The probe's payload format (the /32 scale, the
 // ambient sensor at byte offset 10) is calibrated in internal/meater/meater.go
@@ -24,9 +27,14 @@
 // only while a client is attached: no client, no radio traffic.
 
 #include <Arduino.h>
-#include <ETH.h>
-#include <WiFi.h>  // WiFiServer/WiFiClient + the shared event loop ETH rides on
+#include <WiFi.h>  // WiFiServer/WiFiClient: shared TCP/IP stack for both transports
 #include <NimBLEDevice.h>
+
+#if defined(BRIDGE_WIFI)
+#include <WiFiManager.h>  // captive portal: collects/saves WiFi credentials, no secrets in source
+#else
+#include <ETH.h>
+#endif
 
 // Must match internal/meater/meater.go.
 static constexpr char kProbeNamePrefix[] = "MEATER";
@@ -53,7 +61,7 @@ static QueueHandle_t payloadQueue = nullptr;
 static WiFiServer server(kListenPort);
 static NimBLEClient *probeClient = nullptr;
 static volatile bool probeConnected = false;
-static bool ethConnected = false;
+static bool linkConnected = false;  // Ethernet or WiFi has an IP address
 
 // onNotify runs on the NimBLE task: copy and post, never block or print.
 static void onNotify(NimBLERemoteCharacteristic *chr, uint8_t *data, size_t len, bool isNotify) {
@@ -76,6 +84,41 @@ class ProbeCallbacks : public NimBLEClientCallbacks {
 };
 static ProbeCallbacks probeCallbacks;
 
+// localIP returns whichever interface is actually carrying traffic, so the
+// rest of the file doesn't need to care which transport is compiled in.
+static IPAddress localIP() {
+#if defined(BRIDGE_WIFI)
+    return WiFi.localIP();
+#else
+    return ETH.localIP();
+#endif
+}
+
+#if defined(BRIDGE_WIFI)
+// WiFi association can flap (the AP reboots, the board wanders out of range),
+// so narrate every stage the same way the Ethernet build does. The initial
+// credential collection itself is handled by WiFiManager in setup(), not here.
+static void onWifiEvent(WiFiEvent_t event) {
+    switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_START:
+        WiFi.setHostname("meater-bridge");
+        break;
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+        Serial.println("wifi: associated, requesting DHCP lease...");
+        break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        Serial.printf("wifi up: %s (RSSI %ddBm)\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
+        linkConnected = true;
+        break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+        Serial.println("wifi: disconnected (out of range or AP restarted); reconnecting...");
+        linkConnected = false;
+        break;
+    default:
+        break;
+    }
+}
+#else
 // Ethernet is the whole point of this board, so narrate every stage of bringing
 // it up. Without this, "no cable", "PHY never initialised" and "DHCP timed out"
 // all look identical from the serial log: silence.
@@ -91,20 +134,21 @@ static void onEthEvent(WiFiEvent_t event) {
     case ARDUINO_EVENT_ETH_GOT_IP:
         Serial.printf("ethernet up: %s (%uMbps, %s)\n", ETH.localIP().toString().c_str(),
                       ETH.linkSpeed(), ETH.fullDuplex() ? "full duplex" : "half duplex");
-        ethConnected = true;
+        linkConnected = true;
         break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
         Serial.println("ethernet: link down (cable unplugged?)");
-        ethConnected = false;
+        linkConnected = false;
         break;
     case ARDUINO_EVENT_ETH_STOP:
         Serial.println("ethernet: stopped");
-        ethConnected = false;
+        linkConnected = false;
         break;
     default:
         break;
     }
 }
+#endif
 
 // findProbe scans for a MEATER* advertisement and returns it, or nullptr.
 static const NimBLEAdvertisedDevice *findProbe() {
@@ -173,26 +217,49 @@ void setup() {
 
     payloadQueue = xQueueCreate(16, sizeof(Payload));
 
+#if defined(BRIDGE_WIFI)
+    WiFi.onEvent(onWifiEvent);
+    WiFi.setAutoReconnect(true);
+
+    // Tries the saved network first and only opens the "meater-bridge-setup"
+    // access point (192.168.4.1) if that fails or nothing is saved yet -- so a
+    // normal reboot reconnects silently, and only the very first boot (or a
+    // credentials change) needs a phone/laptop to join the portal.
+    WiFiManager wm;
+    wm.setHostname("meater-bridge");
+    wm.setConfigPortalTimeout(180);
+    if (!wm.autoConnect("meater-bridge-setup")) {
+        Serial.println("wifi: setup portal timed out with no connection; rebooting to retry");
+        delay(3000);
+        ESP.restart();
+    }
+#else
     WiFi.onEvent(onEthEvent);
     ETH.begin();  // pin map comes from the esp32-poe-iso variant header
+#endif
 
     NimBLEDevice::init("meater-bridge");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9);  // grill may be a room away
 
     server.begin();
     server.setNoDelay(true);
-    Serial.printf("TCP server ready on :%u (reachable once ethernet has an IP)\n", kListenPort);
+    Serial.printf("TCP server ready on :%u (reachable once the network link is up)\n", kListenPort);
 }
 
 void loop() {
-    if (!ethConnected) {
-        // Say so periodically rather than idling silently: with USB power but no
-        // cable the board looks identical to a working one, and "listening on
-        // :9000" above is a lie until we actually have an address.
+    if (!linkConnected) {
+        // Say so periodically rather than idling silently: a board that's
+        // powered but not yet on the network looks identical to a working one,
+        // and "listening on :9000" above is a lie until we actually have an
+        // address.
         static uint32_t lastNag = 0;
         if (millis() - lastNag > 5000) {
             lastNag = millis();
+#if defined(BRIDGE_WIFI)
+            Serial.println("waiting for wifi (no IP yet)");
+#else
             Serial.println("waiting for ethernet (no IP yet; USB gives power+serial only)");
+#endif
         }
         delay(200);
         return;
@@ -205,7 +272,7 @@ void loop() {
     }
 
     Serial.printf("client %s attached\n", client.remoteIP().toString().c_str());
-    client.printf("# meater-bridge on %s\n", ETH.localIP().toString().c_str());
+    client.printf("# meater-bridge on %s\n", localIP().toString().c_str());
 
     xQueueReset(payloadQueue);
     // -1 means "nothing reported yet", so the first pass always states the
