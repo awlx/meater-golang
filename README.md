@@ -37,7 +37,7 @@ readings to the console.
 - **Prometheus metrics** at `/metrics`, covering everything the dashboard shows
   and the service's own health.
 - **Remote probe over an ESP32 bridge** (`-bridge`) for when the grill is
-  outside the host's own Bluetooth range — see
+  outside the host's own Bluetooth range, over PoE Ethernet or WiFi — see
   [below](#remote-probe-over-a-networked-esp32-bridge--bridge).
 - **Multiple Bluetooth adapters** (`-adapter`, Linux/BlueZ): point the app at a
   specific controller when a host has more than one, e.g. a longer-range USB
@@ -186,20 +186,27 @@ go run . -addr AA:BB:CC:DD:EE:FF -scan-window 12s
 ## Remote probe over a networked ESP32 bridge (`-bridge`)
 
 The host running this program has to be within Bluetooth range of the probe,
-which is awkward when the grill is outside and the server is in a cupboard. A
-cheap PoE ESP32 (e.g. an **Olimex ESP32-POE-ISO**) can act as the radio instead:
-it holds the BLE link and forwards the probe's readings over Ethernet.
+which is awkward when the grill is outside and the server is in a cupboard. An
+ESP32 can act as the radio instead: it holds the BLE link and forwards the
+probe's readings over the network. Two boards are supported:
+
+- A PoE **Olimex ESP32-POE-ISO**, over Ethernet — one cable for power and
+  network.
+- A generic ESP32 dev board, over WiFi — credentials are collected through a
+  captive portal on first boot, no Ethernet hardware needed.
 
 ```
 MEATER ~BLE~> ESP32-POE-ISO ──PoE/Ethernet──> meater-golang (dashboard, history, ETA)
+MEATER ~BLE~> ESP32 dev board ──WiFi────────> meater-golang (dashboard, history, ETA)
 ```
 
 Firmware, wiring and troubleshooting: **[`firmware/`](firmware/)**.
 
 ```sh
-cd firmware && pio run -t upload    # flash the board, note the IP it prints
+cd firmware && pio run -t upload                  # PoE/Ethernet board (default env)
+cd firmware && pio run -e esp32-wifi -t upload    # or: generic dev board over WiFi
 cd .. && go build -tags nobluetooth -o meater .
-./meater -bridge 192.168.1.42:9000
+./meater -bridge 192.168.1.42:9000                # IP printed in the board's serial log
 ```
 
 The bridge is a peer of the local BLE source, not a replacement: `Start` dials
