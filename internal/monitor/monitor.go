@@ -322,50 +322,43 @@ func (m *Monitor) SetConnected(connected bool) {
 
 // Update records a new reading and notifies subscribers. It also persists the
 // sample to the current cook, auto-starting a new cook on the first reading
-// after an idle period. Update is expected to be called by a single producer
-// (the BLE notification callback or the mock loop), so the cook-start check is
-// race-free.
+// after an idle period.
+//
+// BLE backends may deliver notifications concurrently, so the cook-start path
+// is serialized under m.mu to ensure a single cook row is created.
 func (m *Monitor) Update(r meater.Reading) {
 	now := time.Now()
 	m.mu.Lock()
+	st := m.st
+	if st != nil && m.cookID == 0 {
+		id, err := st.StartCook(m.pendingName, m.pendingMeatType, m.target, now)
+		if err != nil {
+			log.Printf("store: start cook: %v", err)
+		} else {
+			m.cookID = id
+			if m.pendingName != "" {
+				m.cookName = m.pendingName
+			}
+			if m.pendingMeatType != "" {
+				m.meatType = m.pendingMeatType
+			}
+			// Fresh cook: start its history from this reading.
+			m.history = m.history[:0]
+		}
+	}
 	m.latest = r
 	m.hasRead = true
 	m.connected = true
 	m.updatedAt = now
-	needStart := m.st != nil && m.cookID == 0
-	if needStart {
-		// Fresh cook: start its history from this reading.
-		m.history = m.history[:0]
-	}
 	m.history = append(m.history, sample{at: now, reading: r})
 	if len(m.history) > historyLimit {
 		m.history = m.history[len(m.history)-historyLimit:]
 	}
 	m.lastSampleAt = now
-	st := m.st
 	cookID := m.cookID
-	name := m.pendingName
-	meatType := m.pendingMeatType
-	target := m.target
 	m.mu.Unlock()
 
 	if st != nil {
-		if needStart {
-			if id, err := st.StartCook(name, meatType, target, now); err != nil {
-				log.Printf("store: start cook: %v", err)
-			} else {
-				m.mu.Lock()
-				m.cookID = id
-				if name != "" {
-					m.cookName = name
-				}
-				if meatType != "" {
-					m.meatType = meatType
-				}
-				m.mu.Unlock()
-				cookID = id
-			}
-		}
 		if cookID != 0 {
 			if err := st.AppendSample(cookID, now, r.TipCelsius, r.AmbientCelsius); err != nil {
 				log.Printf("store: append sample: %v", err)
