@@ -29,6 +29,12 @@ To just try the UI without a probe (works anywhere, including macOS/Windows
 Docker Desktop):
 
 ```sh
+docker run --rm -p 8080:8080 ghcr.io/awlx/meater:latest -mock -http :8080
+```
+
+Or build locally instead of pulling, e.g. to test an unreleased change:
+
+```sh
 docker build -t meater . && docker run --rm -p 8080:8080 meater -mock -http :8080
 ```
 
