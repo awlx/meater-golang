@@ -7,6 +7,7 @@ package server
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -95,7 +96,8 @@ func (s *Server) handleCooks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cooks)
 }
 
-// handleCook returns a single cook's samples at /api/cooks/{id}.
+// handleCook serves a single cook at /api/cooks/{id}: GET returns its
+// samples, DELETE removes it (and its samples) from history.
 func (s *Server) handleCook(w http.ResponseWriter, r *http.Request) {
 	if s.st == nil {
 		http.NotFound(w, r)
@@ -107,15 +109,30 @@ func (s *Server) handleCook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid cook id", http.StatusBadRequest)
 		return
 	}
-	pts, err := s.st.CookSamples(id)
-	if err != nil {
-		http.Error(w, "failed to load cook", http.StatusInternalServerError)
-		return
+	switch r.Method {
+	case http.MethodGet:
+		pts, err := s.st.CookSamples(id)
+		if err != nil {
+			http.Error(w, "failed to load cook", http.StatusInternalServerError)
+			return
+		}
+		if pts == nil {
+			pts = []store.Point{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "points": pts})
+	case http.MethodDelete:
+		if err := s.mon.DeleteCook(id); err != nil {
+			if errors.Is(err, store.ErrCookActive) {
+				http.Error(w, "cannot delete the active cook; stop it first", http.StatusConflict)
+				return
+			}
+			http.Error(w, "failed to delete cook", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	if pts == nil {
-		pts = []store.Point{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "points": pts})
 }
 
 // handleCookNew ends the current cook and starts a fresh one.

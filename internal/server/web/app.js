@@ -669,13 +669,42 @@ async function loadCooks() {
 				</div>
 				<div class="cook-side">
 					<span class="cook-max">max ${maxTip}°${state.unit}</span>
-					${c.active ? '<span class="cook-badge">live</span>' : ''}
+					${c.active ? '<span class="cook-badge">live</span>' : '<button type="button" class="cook-delete" title="Delete this cook" aria-label="Delete this cook">&times;</button>'}
 				</div>`;
 			li.addEventListener('click', () => viewCook(c.id, name, c.targetCelsius));
+			if (!c.active) {
+				const delBtn = li.querySelector('.cook-delete');
+				delBtn.addEventListener('click', (ev) => {
+					ev.stopPropagation();
+					deleteCook(c.id, name);
+				});
+			}
 			list.appendChild(li);
 		}
 	} catch (err) {
 		console.error('load cooks failed', err);
+	}
+}
+
+// deleteCook removes a finished cook from history after a confirmation
+// prompt. If it was the cook currently shown on the chart, goes back to live.
+async function deleteCook(id, name) {
+	if (!confirm(`Delete "${name}"? This can't be undone.`)) return;
+	try {
+		const res = await fetch('/api/cooks/' + id, { method: 'DELETE' });
+		if (!res.ok) {
+			const msg = await res.text();
+			alert('Failed to delete cook: ' + (msg || res.status));
+			return;
+		}
+		if (state.viewingCookId === id) {
+			backToLive();
+		} else {
+			loadCooks();
+		}
+	} catch (err) {
+		console.error('delete cook failed', err);
+		alert('Failed to delete cook.');
 	}
 }
 

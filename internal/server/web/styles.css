@@ -632,6 +632,29 @@ body {
 	letter-spacing: .5px;
 }
 
+.cook-delete {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--muted);
+	font-size: 16px;
+	line-height: 1;
+	cursor: pointer;
+	transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+
+.cook-delete:hover {
+	border-color: var(--bad, #e5484d);
+	color: var(--bad, #e5484d);
+	background: rgba(229, 72, 77, .1);
+}
+
 .cooks-empty {
 	color: var(--muted);
 	font-size: 13px;

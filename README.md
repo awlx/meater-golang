@@ -28,8 +28,9 @@ readings to the console.
   a few in the database. Stays stable through a stall (the flat, sweating phase
   on big cuts) instead of blowing up to an absurd number.
 - **Cook history**: every reading is persisted to SQLite, so charts cover the
-  full cook (not a rolling window), past cooks can be browsed, and an
-  in-progress cook survives an app or host restart.
+  full cook (not a rolling window), past cooks can be browsed, an in-progress
+  cook survives an app or host restart, and old ones (up to the 10 most recent
+  are kept automatically) can be deleted individually from the sidebar.
 - **Alerts**: ambient out-of-range and "almost done" notifications, with a beep
   and (over HTTPS) native browser/PWA notifications.
 - **Home Assistant integration** installable through HACS: the cook appears as a

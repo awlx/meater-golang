@@ -5,6 +5,7 @@
 package monitor
 
 import (
+	"errors"
 	"log"
 	"math"
 	"sync"
@@ -449,6 +450,24 @@ func (m *Monitor) NewCook(name string) {
 		go m.LoadHistory()
 	}
 	m.broadcast(status)
+}
+
+// DeleteCook removes a finished cook and its samples from persistent storage.
+// It refuses to delete the currently active cook (store.ErrCookActive) — stop
+// or start a new cook first. Since the deleted cook may have been part of the
+// learned ETA model, it reloads that model afterwards.
+func (m *Monitor) DeleteCook(id int64) error {
+	m.mu.RLock()
+	st := m.st
+	m.mu.RUnlock()
+	if st == nil {
+		return errors.New("history persistence is disabled")
+	}
+	if err := st.DeleteCook(id); err != nil {
+		return err
+	}
+	go m.LoadHistory()
+	return nil
 }
 
 // RunJanitor periodically finishes the current cook once the probe has been

@@ -77,15 +77,28 @@ func TestHistoricalETAUsesPastCookThroughStall(t *testing.T) {
 	}
 }
 
-func TestHistoricalETAMeatTypeFallback(t *testing.T) {
+func TestHistoricalETARejectsCrossMeatTypeMatch(t *testing.T) {
 	hc, _ := buildHistCook(synthCook("brisket", 95, 110), synthSamples(110))
 	m := &Monitor{histModel: []histCook{hc}}
 
-	// No exact match for "pork neck": fall back to all comparable cooks rather
-	// than returning unknown.
+	// No cook of type "pork neck" exists (only a "brisket" one): the estimate
+	// must not borrow from a different meat type, so it comes back unknown
+	// rather than falling back to an unrelated cook.
 	eta, n, _, _ := m.historicalETALocked(50, 110, 95, "pork neck")
+	if n != 0 || eta != -1 {
+		t.Fatalf("expected no cross-type match, got n=%d eta=%.0f", n, eta)
+	}
+}
+
+func TestHistoricalETAUsesAllCooksWhenMeatTypeUnset(t *testing.T) {
+	hc, _ := buildHistCook(synthCook("brisket", 95, 110), synthSamples(110))
+	m := &Monitor{histModel: []histCook{hc}}
+
+	// The current cook has no meat type set: there is nothing to match
+	// against, so any comparable past cook may inform the estimate.
+	eta, n, _, _ := m.historicalETALocked(50, 110, 95, "")
 	if n != 1 || eta <= 0 {
-		t.Fatalf("expected fallback match, got n=%d eta=%.0f", n, eta)
+		t.Fatalf("expected match with meat type unset, got n=%d eta=%.0f", n, eta)
 	}
 }
 
