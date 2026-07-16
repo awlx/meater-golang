@@ -44,3 +44,5 @@ groups:
       - alert: MeaterProbeSilent
         expr: meater_discovery_running == 1 and meater_last_sample_age_seconds > 300
 ```
+
+A ready-made dashboard for this endpoint is in **[docs/grafana/](grafana/)**.

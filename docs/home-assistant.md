@@ -62,3 +62,6 @@ Progress is measured from the temperature the cook *started* at, not from 0 °C:
 a steak going 20 °C → 55 °C is genuinely half done at 37 °C, where naive
 `tip / target` arithmetic would have called it two-thirds done before it hit the
 pan.
+
+If you also scrape Home Assistant's own `prometheus:` integration, there's a
+ready-made dashboard for these entities in **[docs/grafana/](grafana/)**.

@@ -33,7 +33,8 @@ temperature chart, doneness targets, ETA, and browser alerts.
   can be browsed or deleted, and the ETA learns from your own past cooks of the
   same meat type.
 - **Home Assistant integration** (via HACS) and **Prometheus metrics** for
-  automation and monitoring.
+  automation and monitoring, with ready-made **[Grafana dashboards](docs/grafana/)**
+  for either source.
 - **Mock mode** to explore the UI with simulated data — no probe or Bluetooth
   required.
 
@@ -90,6 +91,7 @@ the systemd unit) are in **[docs/install.md](docs/install.md)**.
 | **[docs/https.md](docs/https.md)**                     | HTTPS/TLS options, and how multiple viewers share one probe.                      |
 | **[docs/home-assistant.md](docs/home-assistant.md)**   | Installing via HACS and the entities it exposes.                                  |
 | **[docs/metrics.md](docs/metrics.md)**                 | The Prometheus `/metrics` endpoint and example alert rules.                       |
+| **[docs/grafana/](docs/grafana/)**                     | Ready-made Grafana dashboards, for the native `/metrics` or Home Assistant.        |
 | **[docs/architecture.md](docs/architecture.md)**       | Project layout and how the BLE temperature payload is decoded.                    |
 | **[firmware/](firmware/)**                             | ESP32 bridge firmware (PlatformIO/C++), wiring, and flashing.                      |
 

@@ -1,0 +1,244 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "The Prometheus datasource scraping meater-golang's own /metrics endpoint directly.",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "gauge", "name": "Gauge", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" },
+    { "type": "panel", "id": "text", "name": "Text", "version": "" }
+  ],
+  "title": "MEATER Monitor",
+  "description": "Reads meater-golang's own /metrics endpoint directly (docs/metrics.md). See meater-homeassistant.json for the variant that goes through Home Assistant's Prometheus integration instead.",
+  "uid": "meater-native",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "tags": ["meater", "meater-golang"],
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(meater_up, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Cook",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Temperatures",
+      "description": "Tip (meat), ambient (chamber), and target, in °C.",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "celsius" }, "overrides": [] },
+      "targets": [
+        { "expr": "meater_tip_celsius{instance=~\"$instance\"}", "legendFormat": "tip", "refId": "A" },
+        { "expr": "meater_ambient_celsius{instance=~\"$instance\"}", "legendFormat": "ambient", "refId": "B" },
+        { "expr": "meater_target_celsius{instance=~\"$instance\"}", "legendFormat": "target", "refId": "C" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "Cook progress",
+      "description": "Fraction of the climb from the cook's starting tip temperature to the target.",
+      "gridPos": { "h": 9, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 0.95 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "meater_cook_progress_ratio{instance=~\"$instance\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Time to target",
+      "description": "NaN (blank) means unknown, e.g. during a deep stall.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "dtdurations" }, "overrides": [] },
+      "targets": [
+        { "expr": "meater_eta_seconds{instance=~\"$instance\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Ready at",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "dateTimeAsIso" }, "overrides": [] },
+      "targets": [
+        { "expr": "meater_ready_timestamp_seconds{instance=~\"$instance\"} * 1000", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Rise rate",
+      "description": "°C/min, from the least-squares fit used for the ETA.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "expr": "meater_rate_celsius_per_minute{instance=~\"$instance\"}", "legendFormat": "{{instance}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Cook state",
+      "description": "One series per possible state; the active one reads 1.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "name" },
+      "targets": [
+        { "expr": "meater_state{instance=~\"$instance\"} == 1", "legendFormat": "{{state}}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Estimate source",
+      "description": "Which model is behind the current ETA: physics, history, blend, or none.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "name" },
+      "targets": [
+        { "expr": "meater_eta_source{instance=~\"$instance\"} == 1", "legendFormat": "{{source}}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Probe connected",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Disconnected", "color": "red" }, "1": { "text": "Connected", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "meater_probe_connected{instance=~\"$instance\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Last sample age",
+      "description": "Alert on this: a growing number means the BLE link is silently wedged.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 300 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "meater_last_sample_age_seconds{instance=~\"$instance\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Current cook",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "meater_cook_info{instance=~\"$instance\"}", "format": "table", "instant": true, "refId": "A" }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Value": true, "Time": true, "__name__": true, "job": true } } }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Database",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Cooks in DB",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "meater_db_cooks{instance=~\"$instance\"}", "instant": true, "refId": "A" } ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Finished cooks",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [ { "expr": "meater_db_finished_cooks{instance=~\"$instance\"}", "instant": true, "refId": "A" } ]
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Samples in DB",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 29 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [ { "expr": "meater_db_samples{instance=~\"$instance\"}", "instant": true, "refId": "A" } ]
+    }
+  ]
+}
