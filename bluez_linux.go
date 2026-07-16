@@ -6,11 +6,117 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/godbus/dbus/v5"
 )
+
+// adapterID is the BlueZ controller (e.g. "hci0") this process drives. It is
+// the default until selectAdapter picks another, and is used to build the
+// per-adapter device object paths below.
+var adapterID = "hci0"
+
+// adapterSpec is the raw -adapter value (empty, an hci id, or a controller MAC)
+// so refreshAdapter can re-resolve it if a flaky USB controller re-enumerates.
+var adapterSpec string
+
+// selectAdapter points both this BlueZ helper and the tinygo bluetooth backend
+// at a specific controller. spec may be empty (keep the default hci0), an hci
+// id like "hci1", or a controller MAC like "AA:BB:CC:DD:EE:FF" — a MAC is
+// resolved to its current hci id so it keeps working even if USB re-enumeration
+// renumbers the adapters across a reboot.
+//
+// tinygo's Linux backend hardcodes hci0 in an unexported field with no public
+// selector, so we set that field directly; the field offset is pinned by the
+// module version in go.mod.
+func selectAdapter(spec string) error {
+	spec = strings.TrimSpace(spec)
+	adapterSpec = spec
+	if spec == "" {
+		return nil
+	}
+
+	id := spec
+	if !isHciID(spec) {
+		resolved, err := adapterIDForMAC(spec)
+		if err != nil {
+			return err
+		}
+		id = resolved
+	}
+
+	adapterID = id
+	setTinygoAdapterID(id)
+	log.Printf("using Bluetooth adapter %s", id)
+	return nil
+}
+
+// refreshAdapter re-resolves a MAC-based -adapter selection to its current hci
+// id and re-points the backend when it has changed. This self-heals the case
+// where a flaky USB controller resets and re-enumerates mid-cook (e.g.
+// hci1 -> hci2), which would otherwise leave the backend talking to a vanished
+// D-Bus object ("SetDiscoveryFilter ... doesn't exist"). It is a no-op for an
+// empty or hci-id selection, and treats a momentarily-missing controller as
+// transient. Safe to call before each scan attempt.
+func refreshAdapter() {
+	if adapterSpec == "" || isHciID(adapterSpec) {
+		return
+	}
+	id, err := adapterIDForMAC(adapterSpec)
+	if err != nil || id == adapterID {
+		return
+	}
+	log.Printf("Bluetooth adapter re-enumerated: %s -> %s", adapterID, id)
+	adapterID = id
+	setTinygoAdapterID(id)
+	if err := adapter.Enable(); err != nil {
+		log.Printf("re-enable adapter %s: %v", id, err)
+	}
+}
+
+func isHciID(s string) bool {
+	return strings.HasPrefix(strings.ToLower(s), "hci")
+}
+
+// adapterIDForMAC looks up the hci id of the controller with the given MAC via
+// BlueZ's ObjectManager.
+func adapterIDForMAC(mac string) (string, error) {
+	bus, err := dbus.SystemBus()
+	if err != nil {
+		return "", fmt.Errorf("system bus: %w", err)
+	}
+	var managed map[dbus.ObjectPath]map[string]map[string]dbus.Variant
+	err = bus.Object("org.bluez", "/").
+		Call("org.freedesktop.DBus.ObjectManager.GetManagedObjects", 0).Store(&managed)
+	if err != nil {
+		return "", fmt.Errorf("list adapters: %w", err)
+	}
+	for path, ifaces := range managed {
+		props, ok := ifaces["org.bluez.Adapter1"]
+		if !ok {
+			continue
+		}
+		addr, _ := props["Address"].Value().(string)
+		if strings.EqualFold(addr, mac) {
+			seg := string(path)
+			if i := strings.LastIndex(seg, "/"); i >= 0 {
+				seg = seg[i+1:]
+			}
+			return seg, nil
+		}
+	}
+	return "", fmt.Errorf("no Bluetooth controller with address %s", mac)
+}
+
+// setTinygoAdapterID overwrites the unexported id field of the tinygo
+// DefaultAdapter so its scans and connects use the chosen controller.
+func setTinygoAdapterID(id string) {
+	f := reflect.ValueOf(adapter).Elem().FieldByName("id")
+	reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem().SetString(id)
+}
 
 // ensureConnected uses BlueZ directly over D-Bus to establish a fully
 // service-resolved GATT connection to the probe.
@@ -28,7 +134,7 @@ func ensureConnected(mac string) error {
 		return fmt.Errorf("system bus: %w", err)
 	}
 
-	path := dbus.ObjectPath("/org/bluez/hci0/dev_" +
+	path := dbus.ObjectPath("/org/bluez/" + adapterID + "/dev_" +
 		strings.ReplaceAll(strings.ToUpper(mac), ":", "_"))
 	dev := bus.Object("org.bluez", path)
 

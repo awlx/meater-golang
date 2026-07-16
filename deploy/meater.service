@@ -12,6 +12,10 @@ WorkingDirectory=/opt/meater
 # Plain HTTP on a backend port. TLS is optional: either let the binary obtain a
 # certificate with -acme-domain, or run it behind a reverse proxy that
 # terminates TLS. See the README.
+#
+# To use a specific Bluetooth controller (e.g. a longer-range USB dongle), add
+# -adapter with its hci id or controller MAC, for example:
+#   ExecStart=/opt/meater/meater -http :8088 -adapter AA:BB:CC:DD:EE:FF
 ExecStart=/opt/meater/meater -http :8088
 Restart=on-failure
 RestartSec=5
