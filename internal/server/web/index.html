@@ -58,7 +58,8 @@
 					</div>
 					<form id="cook-name-form" class="cook-name">
 						<input id="cook-name-input" type="text" maxlength="60" placeholder="What are you cooking?" />
-						<input id="cook-meat-input" type="text" maxlength="40" placeholder="Meat type (e.g. pork neck)" />
+						<input id="cook-meat-input" type="text" maxlength="40" placeholder="Meat type (e.g. pork neck)" list="meat-type-options" autocomplete="off" />
+						<datalist id="meat-type-options"></datalist>
 						<button type="submit">Save</button>
 					</form>
 				</div>

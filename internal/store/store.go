@@ -6,6 +6,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -325,6 +326,36 @@ func (s *Store) Stats() (Stats, error) {
 		return Stats{}, fmt.Errorf("stats samples: %w", err)
 	}
 	return st, nil
+}
+
+// ErrCookActive is returned by DeleteCook when asked to delete a cook that is
+// still open (no end time), so a client cannot accidentally wipe live data.
+var ErrCookActive = errors.New("cook is still active")
+
+// DeleteCook removes a finished cook and all of its samples. It refuses to
+// delete an active (open) cook, returning ErrCookActive — end it first.
+// Deleting an id that no longer exists is a no-op, not an error, so a client
+// racing a concurrent delete or the automatic prune doesn't see a spurious
+// failure.
+func (s *Store) DeleteCook(cookID int64) error {
+	var ended sql.NullInt64
+	err := s.db.QueryRow(`SELECT ended_at FROM cooks WHERE id = ?`, cookID).Scan(&ended)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("delete cook: lookup: %w", err)
+	}
+	if !ended.Valid {
+		return ErrCookActive
+	}
+	if _, err := s.db.Exec(`DELETE FROM samples WHERE cook_id = ?`, cookID); err != nil {
+		return fmt.Errorf("delete cook: samples: %w", err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM cooks WHERE id = ?`, cookID); err != nil {
+		return fmt.Errorf("delete cook: cook: %w", err)
+	}
+	return nil
 }
 
 // Prune deletes finished cooks beyond the most recent keepEndedCooks, along

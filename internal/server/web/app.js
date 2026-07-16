@@ -642,6 +642,22 @@ function fmtCookSpan(c) {
 	return `${day} ${t}${dur}`;
 }
 
+// updateMeatTypeOptions refreshes the <datalist> backing the meat-type input
+// with the distinct meat types seen across saved cooks, so picking a past
+// value (for matching ETA history) is one click, while typing a new one
+// still works since it's a plain text input under the hood.
+function updateMeatTypeOptions(cooks) {
+	const datalist = el('meat-type-options');
+	if (!datalist) return;
+	const seen = new Set();
+	for (const c of cooks || []) {
+		const t = c.meatType && c.meatType.trim();
+		if (t) seen.add(t);
+	}
+	const types = Array.from(seen).sort((a, b) => a.localeCompare(b));
+	datalist.innerHTML = types.map(t => `<option value="${escapeHtml(t)}"></option>`).join('');
+}
+
 async function loadCooks() {
 	const list = el('cooks-list');
 	if (!list) return;
@@ -649,6 +665,7 @@ async function loadCooks() {
 		const res = await fetch('/api/cooks');
 		const cooks = await res.json();
 		list.innerHTML = '';
+		updateMeatTypeOptions(cooks);
 		if (!cooks || cooks.length === 0) {
 			const li = document.createElement('li');
 			li.className = 'cooks-empty';
@@ -662,20 +679,51 @@ async function loadCooks() {
 			if (state.viewingCookId === c.id) li.classList.add('cook-viewing');
 			const name = (c.name && c.name.trim()) || 'Cook #' + c.id;
 			const maxTip = Math.round(cToUnit(c.maxTipCelsius));
+			const meatType = c.meatType && c.meatType.trim();
+			const meta = fmtCookSpan(c) + (meatType ? ' · ' + escapeHtml(meatType) : '');
 			li.innerHTML = `
 				<div class="cook-main">
 					<span class="cook-item-name">${escapeHtml(name)}</span>
-					<span class="cook-meta">${fmtCookSpan(c)}</span>
+					<span class="cook-meta">${meta}</span>
 				</div>
 				<div class="cook-side">
 					<span class="cook-max">max ${maxTip}°${state.unit}</span>
-					${c.active ? '<span class="cook-badge">live</span>' : ''}
+					${c.active ? '<span class="cook-badge">live</span>' : '<button type="button" class="cook-delete" title="Delete this cook" aria-label="Delete this cook">&times;</button>'}
 				</div>`;
 			li.addEventListener('click', () => viewCook(c.id, name, c.targetCelsius));
+			if (!c.active) {
+				const delBtn = li.querySelector('.cook-delete');
+				delBtn.addEventListener('click', (ev) => {
+					ev.stopPropagation();
+					deleteCook(c.id, name);
+				});
+			}
 			list.appendChild(li);
 		}
 	} catch (err) {
 		console.error('load cooks failed', err);
+	}
+}
+
+// deleteCook removes a finished cook from history after a confirmation
+// prompt. If it was the cook currently shown on the chart, goes back to live.
+async function deleteCook(id, name) {
+	if (!confirm(`Delete "${name}"? This can't be undone.`)) return;
+	try {
+		const res = await fetch('/api/cooks/' + id, { method: 'DELETE' });
+		if (!res.ok) {
+			const msg = await res.text();
+			alert('Failed to delete cook: ' + (msg || res.status));
+			return;
+		}
+		if (state.viewingCookId === id) {
+			backToLive();
+		} else {
+			loadCooks();
+		}
+	} catch (err) {
+		console.error('delete cook failed', err);
+		alert('Failed to delete cook.');
 	}
 }
 

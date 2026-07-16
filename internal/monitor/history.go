@@ -180,15 +180,19 @@ func (h histCook) reachToTarget(target float64) float64 {
 // median. It returns -1 with n=0 when no past cook is comparable. The caller
 // must hold at least a read lock.
 //
-// Matching prefers cooks of the same meat type when any exist; otherwise it
-// falls back to all comparable cooks, so a new cut still benefits from the
-// smoker's general behaviour. low/high bound the spread of the matched cooks
-// for an honest range in the UI.
+// Matching is restricted to cooks of the same meat type: a brisket's rise
+// curve is a poor predictor for a steak's, so cross-type "help" is worse than
+// no history at all. When the current cook has no meat type set (want == ""),
+// there is nothing to match against, so every comparable past cook is used.
+// low/high bound the spread of the matched cooks for an honest range in the UI.
 func (m *Monitor) historicalETALocked(tip, chamber, target float64, meatType string) (eta float64, n int, low, high float64) {
 	want := normalizeMeat(meatType)
 
-	var all, exact []float64
+	var use []float64
 	for _, hc := range m.histModel {
+		if want != "" && hc.meatType != want {
+			continue
+		}
 		// The past cook must have climbed through the current tip, and reached
 		// at (or within tolerance of) the target, for the interval to be
 		// measurable. The tolerance lets a cook pulled a few degrees short
@@ -213,16 +217,9 @@ func (m *Monitor) historicalETALocked(tip, chamber, target float64, meatType str
 		if gapNow > 0.5 && gapHist > 0.5 {
 			rem *= clampF(gapHist/gapNow, 0.5, 2)
 		}
-		all = append(all, rem)
-		if want != "" && hc.meatType == want {
-			exact = append(exact, rem)
-		}
+		use = append(use, rem)
 	}
 
-	use := all
-	if want != "" && len(exact) > 0 {
-		use = exact
-	}
 	if len(use) == 0 {
 		return -1, 0, -1, -1
 	}
