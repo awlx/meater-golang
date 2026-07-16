@@ -12,6 +12,12 @@ temperature chart, doneness targets, ETA, and browser alerts.
 
 ## Highlights
 
+- **Everything stays on your network — no MEATER account, no cloud, ever.**
+  The probe is read directly over Bluetooth (or the [ESP32
+  bridge](docs/remote-bridge.md) below) and served from your own instance;
+  the [Home Assistant integration](docs/home-assistant.md) talks straight to
+  that instance over the LAN too, so nothing about your cook ever leaves your
+  network.
 - **Live web dashboard** — a temperature-over-time chart, doneness presets, and
   an ETA that stays sane through a stall, all pushed to the browser in real
   time (no polling), for as many phones/laptops as want to watch.
