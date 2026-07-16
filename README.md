@@ -19,12 +19,29 @@ readings to the console.
   polling, and multiple browsers can watch the same cook at once.
 - **Doneness presets** (rare → brisket) and a custom target with an estimated
   time-to-target.
+- **Start/Stop session control**: the app sits idle (no background scanning)
+  until you press Start, optionally naming the cook and its meat type. Stop
+  ends the session; a restart mid-cook resumes it automatically instead of
+  sitting idle.
+- **Learned ETA**: a Newton's-law-of-cooling physics model, blended with a
+  learned estimate from your own past cooks of the same meat type once you have
+  a few in the database. Stays stable through a stall (the flat, sweating phase
+  on big cuts) instead of blowing up to an absurd number.
+- **Cook history**: every reading is persisted to SQLite, so charts cover the
+  full cook (not a rolling window), past cooks can be browsed, and an
+  in-progress cook survives an app or host restart.
 - **Alerts**: ambient out-of-range and "almost done" notifications, with a beep
   and (over HTTPS) native browser/PWA notifications.
 - **Home Assistant integration** installable through HACS: the cook appears as a
   device with progress, ETA, and a "ready" sensor to automate on.
 - **Prometheus metrics** at `/metrics`, covering everything the dashboard shows
   and the service's own health.
+- **Remote probe over an ESP32 bridge** (`-bridge`) for when the grill is
+  outside the host's own Bluetooth range — see
+  [below](#remote-probe-over-a-networked-esp32-bridge--bridge).
+- **Multiple Bluetooth adapters** (`-adapter`, Linux/BlueZ): point the app at a
+  specific controller when a host has more than one, e.g. a longer-range USB
+  dongle alongside a weak onboard adapter.
 - **Mock mode** to explore the UI with simulated data — no probe or Bluetooth
   required.
 - **Optional TLS**: runs on plain HTTP by default; you *can* add HTTPS with
@@ -52,13 +69,16 @@ to BlueZ over D-Bus in pure Go, so the binary builds fully static with
 go run . -mock        # explore the web UI with simulated data
 ```
 
-Then open <http://localhost:8080/>. With a real probe, just drop `-mock`:
+Then open <http://localhost:8080/> and press **Start** — the app sits idle
+until you do, so it never scans in the background. With a real probe, just drop
+`-mock`:
 
 ```sh
-go run .              # scan, connect, and serve the dashboard on :8080
+go run .              # serve the dashboard on :8080, idle until you press Start
 ```
 
-Console output looks like:
+Console output looks like this once you press Start (the log stays quiet before
+that):
 
 ```
 10:42:31 scanning for MEATER probe...
