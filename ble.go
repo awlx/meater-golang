@@ -39,11 +39,16 @@ var (
 		"how many times to retry a failed connection before rescanning")
 	connectTimeout = flag.Duration("connect-timeout", 25*time.Second,
 		"abort a connection attempt that takes longer than this (BlueZ can hang)")
+	btAdapter = flag.String("adapter", "",
+		"Bluetooth adapter to use, as an hci id (e.g. hci1) or a controller MAC (e.g. AA:BB:CC:DD:EE:FF); empty uses hci0. A MAC is resolved to its hci id at startup so it survives adapter re-numbering across reboots")
 )
 
 // runBLE keeps a MEATER probe connected, decoding its temperature stream into
 // the monitor and reconnecting whenever the link drops.
 func runBLE(mon *monitor.Monitor) {
+	if err := selectAdapter(*btAdapter); err != nil {
+		log.Fatalf("select Bluetooth adapter %q: %v", *btAdapter, err)
+	}
 	must("enable BLE adapter", adapter.Enable())
 	serviceUUID := mustUUID(meater.ServiceUUID)
 	tempUUID := mustUUID(meater.TemperatureCharUUID)
@@ -164,12 +169,20 @@ func findAndConnect(stop <-chan struct{}) (bluetooth.Device, bool) {
 		default:
 		}
 
+		// If a flaky USB controller re-enumerated (e.g. hci1 -> hci2), re-point
+		// the backend at its new hci id before scanning so we don't talk to a
+		// vanished D-Bus object. No-op for the default/hci-id selection.
+		refreshAdapter()
+
 		result, found, err := scanOnce(*scanWindow, stop)
 		if err != nil {
 			// BlueZ can report "Operation already in progress" if a previous
-			// scan has not fully stopped yet. Recover instead of exiting.
+			// scan has not fully stopped yet, or a vanished-adapter error if the
+			// controller just re-enumerated. Re-resolve and recover instead of
+			// exiting.
 			log.Printf("scan error: %v (recovering)", err)
 			_ = adapter.StopScan()
+			refreshAdapter()
 			time.Sleep(2 * time.Second)
 			continue
 		}

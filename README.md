@@ -139,6 +139,7 @@ sudo setcap 'cap_net_raw,cap_net_admin+eip' /opt/meater/meater
 | Flag                | Default      | Description                                                                       |
 | ------------------- | ------------ | -------------------------------------------------------------------------------- |
 | `-addr`             | (none)       | Connect to a specific BLE MAC (e.g. `AA:BB:CC:DD:EE:FF`) instead of matching by name. |
+| `-adapter`          | (none)       | Bluetooth controller to use, as an hci id (e.g. `hci1`) or a controller MAC (e.g. `AA:BB:CC:DD:EE:FF`); empty uses `hci0`. A MAC is resolved to its hci id at startup, so it survives adapter re-numbering across reboots (Linux/BlueZ only). |
 | `-scan-window`      | `15s`        | How long each scan attempt runs before retrying.                                 |
 | `-timeout`          | `0`          | Give up after this long (`0` = retry forever).                                    |
 | `-connect-retries`  | `3`          | Connection attempts before rescanning.                                           |
