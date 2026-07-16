@@ -1,0 +1,180 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "The Prometheus datasource scraping Home Assistant's own /api/prometheus endpoint (the built-in `prometheus:` integration), not meater-golang directly.",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "gauge", "name": "Gauge", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "text", "name": "Text", "version": "" }
+  ],
+  "title": "MEATER Monitor (via Home Assistant)",
+  "description": "Reads the meater_golang entities back out of Home Assistant's own Prometheus exporter (see docs/home-assistant.md for the entity list, and HA's `prometheus:` integration for how to enable /api/prometheus). See meater-native.json for the variant that scrapes meater-golang's own /metrics endpoint directly instead.\n\nHome Assistant emits several metrics per entity that all share the same `entity` label: the actual value (named per-domain, e.g. `homeassistant_sensor_temperature_celsius`), plus generic cross-domain metadata like `homeassistant_entity_available` and a last-updated/last-changed timestamp. A bare `{entity=\"...\"}` selector matches all of them at once, which shows up as extra duplicate series full of huge Unix-timestamp numbers or stray 0/1s. To avoid that, every query here also filters `__name__` down to the domain's metric prefix (`homeassistant_sensor_.*` or `homeassistant_binary_sensor_.*`), which is specific to the real value metric and excludes HA's generic per-entity metadata metrics. If a panel is still empty or looks wrong, open your HA instance's /api/prometheus output and search for the entity_id to see exactly what metric name(s) it produced, then adjust the query's __name__ filter.",
+  "uid": "meater-homeassistant",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "tags": ["meater", "meater-golang", "home-assistant"],
+  "templating": {
+    "list": [
+      {
+        "name": "entity_prefix",
+        "type": "textbox",
+        "label": "HA device slug",
+        "description": "The entity_id prefix Home Assistant gave the MEATER Monitor device, e.g. sensor.<this>_internal_temperature. Defaults to the integration's default device name, slugified.",
+        "current": { "text": "meater_monitor", "value": "meater_monitor" },
+        "query": "meater_monitor"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Cook",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Temperatures",
+      "description": "Tip (meat), ambient (chamber), and target, in whatever unit system your HA instance uses.",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "{entity=\"sensor.${entity_prefix}_internal_temperature\", __name__=~\"homeassistant_sensor_.*\"}", "legendFormat": "tip", "refId": "A" },
+        { "expr": "{entity=\"sensor.${entity_prefix}_ambient_temperature\", __name__=~\"homeassistant_sensor_.*\"}", "legendFormat": "ambient", "refId": "B" },
+        { "expr": "{entity=\"sensor.${entity_prefix}_target_temperature\", __name__=~\"homeassistant_sensor_.*\"}", "legendFormat": "target", "refId": "C" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "Cook progress",
+      "description": "Home Assistant's cook_progress sensor is already 0-100 (a percent), unlike the native dashboard's 0-1 ratio.",
+      "gridPos": { "h": 9, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "{entity=\"sensor.${entity_prefix}_cook_progress\", __name__=~\"homeassistant_sensor_.*\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Time to target",
+      "description": "In seconds. Home Assistant clears this sensor to unavailable rather than publishing a negative sentinel, so a blank panel means unknown (e.g. a deep stall), same as the native dashboard's NaN.",
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "dtdurations" }, "overrides": [] },
+      "targets": [
+        { "expr": "{entity=\"sensor.${entity_prefix}_time_to_target\", __name__=~\"homeassistant_sensor_.*\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Rise rate",
+      "description": "°C/min (or °F/min, matching HA's unit system). This is a non-standard unit for HA's Prometheus exporter, so if this is empty, check /api/prometheus for the actual metric name.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "{entity=\"sensor.${entity_prefix}_rise_rate\", __name__=~\"homeassistant_sensor_.*\"}", "legendFormat": "rise rate", "refId": "A" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Ready",
+      "description": "Automate on this one — it's a plain binary_sensor, so it exports reliably as 0/1 regardless of HA version.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Not ready", "color": "blue" }, "1": { "text": "Ready", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "{entity=\"binary_sensor.${entity_prefix}_ready\", __name__=~\"homeassistant_binary_sensor_.*\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Probe connected",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Disconnected", "color": "red" }, "1": { "text": "Connected", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "{entity=\"binary_sensor.${entity_prefix}_probe_connected\", __name__=~\"homeassistant_binary_sensor_.*\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Cook session active",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Stopped", "color": "gray" }, "1": { "text": "Running", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "{entity=\"binary_sensor.${entity_prefix}_cook_session\", __name__=~\"homeassistant_binary_sensor_.*\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "text",
+      "title": "Not shown here",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 14 },
+      "options": {
+        "mode": "markdown",
+        "content": "Cook state, estimate source, cook name, and meat type are text/enum sensors, and `ready_at`/`cook_started` are timestamps. Home Assistant's Prometheus exporter generally does not publish non-numeric sensor states as a scrapeable value, so they're left off this dashboard — view them directly in Home Assistant, or on [meater-native.json](meater-native.json) if you scrape meater-golang directly instead."
+      }
+    }
+  ]
+}
