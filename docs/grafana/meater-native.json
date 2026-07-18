@@ -57,7 +57,7 @@
       "type": "timeseries",
       "title": "Temperatures",
       "description": "Tip (meat), ambient (chamber), and target, in °C.",
-      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 1 },
+      "gridPos": { "h": 9, "w": 9, "x": 0, "y": 1 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "celsius" }, "overrides": [] },
       "targets": [
@@ -67,11 +67,95 @@
       ]
     },
     {
+      "id": 19,
+      "type": "gauge",
+      "title": "Tip temperature",
+      "description": "Plain current tip (meat) reading in °C, on a fixed 0-100°C range with generic raw/cooking/well-done reference bands (not tied to this cook's actual target — see the Tip vs target gauge for that).",
+      "gridPos": { "h": 9, "w": 5, "x": 9, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 40 },
+              { "color": "orange", "value": 60 },
+              { "color": "red", "value": 75 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "meater_tip_celsius{instance=~\"$instance\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "gauge",
+      "title": "Tip vs target",
+      "description": "Tip (meat) temperature as a percentage of this cook's target, so the color is meaningful no matter what target was set: red while still well below it, yellow as it closes in, green at/near target. See the Temperatures panel for the exact °C.",
+      "gridPos": { "h": 9, "w": 5, "x": 14, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 110,
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "100 * meater_tip_celsius{instance=~\"$instance\"} / meater_target_celsius{instance=~\"$instance\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "gauge",
+      "title": "Ambient temperature",
+      "description": "Current chamber/ambient temperature. There's no target sensor for ambient, so this uses a fixed 0-300°C range (typical grill/smoker/oven) rather than being colored relative to a target.",
+      "gridPos": { "h": 9, "w": 5, "x": 19, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "min": 0,
+          "max": 300,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 90 },
+              { "color": "orange", "value": 180 },
+              { "color": "red", "value": 250 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "meater_ambient_celsius{instance=~\"$instance\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
       "id": 3,
       "type": "gauge",
       "title": "Cook progress",
       "description": "Fraction of the climb from the cook's starting tip temperature to the target.",
-      "gridPos": { "h": 9, "w": 4, "x": 16, "y": 1 },
+      "gridPos": { "h": 8, "w": 4, "x": 0, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
@@ -97,7 +181,7 @@
       "type": "stat",
       "title": "Time to target",
       "description": "NaN (blank) means unknown, e.g. during a deep stall.",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "dtdurations" }, "overrides": [] },
       "targets": [
@@ -108,7 +192,7 @@
       "id": 5,
       "type": "stat",
       "title": "Ready at",
-      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 5 },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "dateTimeAsIso" }, "overrides": [] },
       "targets": [
@@ -120,7 +204,7 @@
       "type": "timeseries",
       "title": "Rise rate",
       "description": "°C/min, from the least-squares fit used for the ETA.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
@@ -132,7 +216,7 @@
       "type": "stat",
       "title": "Cook state",
       "description": "One series per possible state; the active one reads 1.",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 10 },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "name" },
       "targets": [
@@ -144,7 +228,7 @@
       "type": "stat",
       "title": "Estimate source",
       "description": "Which model is behind the current ETA: physics, history, blend, or none.",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 10 },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "name" },
       "targets": [
@@ -155,7 +239,7 @@
       "id": 9,
       "type": "stat",
       "title": "Probe connected",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 14 },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
@@ -174,7 +258,7 @@
       "type": "stat",
       "title": "Last sample age",
       "description": "Alert on this: a growing number means the BLE link is silently wedged.",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 14 },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
@@ -198,7 +282,7 @@
       "id": 11,
       "type": "table",
       "title": "Current cook",
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 18 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
         { "expr": "meater_cook_info{instance=~\"$instance\"}", "format": "table", "instant": true, "refId": "A" }
@@ -211,7 +295,7 @@
       "id": 12,
       "type": "row",
       "title": "Database",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
       "collapsed": false,
       "panels": []
     },
@@ -219,7 +303,7 @@
       "id": 13,
       "type": "stat",
       "title": "Cooks in DB",
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 29 },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 25 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [ { "expr": "meater_db_cooks{instance=~\"$instance\"}", "instant": true, "refId": "A" } ]
     },
@@ -227,7 +311,7 @@
       "id": 14,
       "type": "stat",
       "title": "Finished cooks",
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 29 },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 25 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [ { "expr": "meater_db_finished_cooks{instance=~\"$instance\"}", "instant": true, "refId": "A" } ]
     },
@@ -235,7 +319,7 @@
       "id": 15,
       "type": "stat",
       "title": "Samples in DB",
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 29 },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 25 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [ { "expr": "meater_db_samples{instance=~\"$instance\"}", "instant": true, "refId": "A" } ]
