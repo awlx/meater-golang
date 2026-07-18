@@ -54,7 +54,7 @@
       "type": "timeseries",
       "title": "Temperatures",
       "description": "Tip (meat), ambient (chamber), and target, in whatever unit system your HA instance uses.",
-      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 1 },
+      "gridPos": { "h": 9, "w": 9, "x": 0, "y": 1 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
         { "expr": "{entity=\"sensor.${entity_prefix}_internal_temperature\", __name__=~\"homeassistant_sensor_.*\"}", "legendFormat": "tip", "refId": "A" },
@@ -63,11 +63,93 @@
       ]
     },
     {
+      "id": 13,
+      "type": "gauge",
+      "title": "Tip temperature",
+      "description": "Plain current tip (meat) reading, on a fixed 0-100 range with generic raw/cooking/well-done reference bands (adjust if your HA instance reports °F; not tied to this cook's actual target — see the Tip vs target gauge for that).",
+      "gridPos": { "h": 9, "w": 5, "x": 9, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 40 },
+              { "color": "orange", "value": 60 },
+              { "color": "red", "value": 75 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "{entity=\"sensor.${entity_prefix}_internal_temperature\", __name__=~\"homeassistant_sensor_.*\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "gauge",
+      "title": "Tip vs target",
+      "description": "Tip (meat) temperature as a percentage of this cook's target, so the color is meaningful no matter what target was set: red while still well below it, yellow as it closes in, green at/near target. See the Temperatures panel for the exact reading.",
+      "gridPos": { "h": 9, "w": 5, "x": 14, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 110,
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "100 * {entity=\"sensor.${entity_prefix}_internal_temperature\", __name__=~\"homeassistant_sensor_.*\"} / on(instance, job) {entity=\"sensor.${entity_prefix}_target_temperature\", __name__=~\"homeassistant_sensor_.*\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "gauge",
+      "title": "Ambient temperature",
+      "description": "Current chamber/ambient temperature. There's no target sensor for ambient, so this uses a fixed 0-300 range (adjust if your HA instance reports °F) rather than being colored relative to a target.",
+      "gridPos": { "h": 9, "w": 5, "x": 19, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 300,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 90 },
+              { "color": "orange", "value": 180 },
+              { "color": "red", "value": 250 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "{entity=\"sensor.${entity_prefix}_ambient_temperature\", __name__=~\"homeassistant_sensor_.*\"}", "instant": true, "refId": "A" }
+      ]
+    },
+    {
       "id": 3,
       "type": "gauge",
       "title": "Cook progress",
       "description": "Home Assistant's cook_progress sensor is already 0-100 (a percent), unlike the native dashboard's 0-1 ratio.",
-      "gridPos": { "h": 9, "w": 4, "x": 16, "y": 1 },
+      "gridPos": { "h": 8, "w": 4, "x": 0, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
@@ -93,7 +175,7 @@
       "type": "stat",
       "title": "Time to target",
       "description": "In seconds. Home Assistant clears this sensor to unavailable rather than publishing a negative sentinel, so a blank panel means unknown (e.g. a deep stall), same as the native dashboard's NaN.",
-      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 1 },
+      "gridPos": { "h": 8, "w": 4, "x": 4, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "dtdurations" }, "overrides": [] },
       "targets": [
@@ -105,7 +187,7 @@
       "type": "timeseries",
       "title": "Rise rate",
       "description": "°C/min (or °F/min, matching HA's unit system). This is a non-standard unit for HA's Prometheus exporter, so if this is empty, check /api/prometheus for the actual metric name.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
         { "expr": "{entity=\"sensor.${entity_prefix}_rise_rate\", __name__=~\"homeassistant_sensor_.*\"}", "legendFormat": "rise rate", "refId": "A" }
@@ -116,7 +198,7 @@
       "type": "stat",
       "title": "Ready",
       "description": "Automate on this one — it's a plain binary_sensor, so it exports reliably as 0/1 regardless of HA version.",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 10 },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
@@ -134,7 +216,7 @@
       "id": 7,
       "type": "stat",
       "title": "Probe connected",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 10 },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
@@ -152,7 +234,7 @@
       "id": 8,
       "type": "stat",
       "title": "Cook session active",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 14 },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
@@ -170,7 +252,7 @@
       "id": 9,
       "type": "text",
       "title": "Not shown here",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 14 },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 14 },
       "options": {
         "mode": "markdown",
         "content": "Cook state, estimate source, cook name, and meat type are text/enum sensors, and `ready_at`/`cook_started` are timestamps. Home Assistant's Prometheus exporter generally does not publish non-numeric sensor states as a scrapeable value, so they're left off this dashboard — view them directly in Home Assistant, or on [meater-native.json](meater-native.json) if you scrape meater-golang directly instead."
