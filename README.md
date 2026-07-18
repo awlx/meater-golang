@@ -12,6 +12,8 @@ temperature chart, doneness targets, ETA, and browser alerts.
 
 ![MEATER Monitor web UI](docs/screenshot.png)
 
+More screenshots: [Grafana dashboards](docs/grafana/) · [Home Assistant](docs/home-assistant.md)
+
 ## Highlights
 
 - **Everything stays on your network — no MEATER account, no cloud, ever.**

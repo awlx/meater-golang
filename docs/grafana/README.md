@@ -36,6 +36,8 @@ excludes those without needing to enumerate them by name.
 An `entity_prefix` dashboard variable (default `meater_monitor`) controls the
 entity_id prefix, in case you renamed the integration's device.
 
+![Home Assistant dashboard](screenshot-homeassistant.png)
+
 Cook state, estimate source, cook name, meat type, and the timestamp sensors
 (`ready_at`, `cook_started`) are left off this dashboard: they're string/enum/
 timestamp sensors, and Home Assistant's Prometheus exporter generally doesn't

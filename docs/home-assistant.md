@@ -8,6 +8,8 @@ It talks to *your* instance over the local API — it never touches the MEATER
 cloud. (For the cloud, use Home Assistant's built-in `meater` integration; the
 two can coexist, which is why this one uses the `meater_golang` domain.)
 
+![MEATER Monitor device in Home Assistant](screenshot-home-assistant.png)
+
 ## Install
 
 1. In Home Assistant: **HACS → ⋮ → Custom repositories**.
