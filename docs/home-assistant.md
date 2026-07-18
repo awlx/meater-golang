@@ -19,6 +19,11 @@ two can coexist, which is why this one uses the `meater_golang` domain.)
 
 Requires Home Assistant 2025.3.0 or newer.
 
+The integration ships its own brand icon (`custom_components/meater_golang/brand/`),
+which Home Assistant 2026.3.0+ renders automatically wherever the integration is
+shown (HACS listing, integrations page, device page). On older versions the icon
+just falls back to the generic placeholder — everything else still works.
+
 ## Entities
 
 | Entity                        | Notes                                                         |

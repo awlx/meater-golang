@@ -1,5 +1,7 @@
 # meater-golang
 
+<img src="docs/logo.png" alt="meater-golang logo" width="220">
+
 Read the [MEATER](https://meater.com/) wireless meat thermometer probe over
 Bluetooth Low Energy from Go — with a clean, self-hosted web UI.
 
