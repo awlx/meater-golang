@@ -49,6 +49,22 @@ func TestParseTemperatureReachesCookTarget(t *testing.T) {
 	}
 }
 
+func TestParseTemperatureDecodesNegativeValues(t *testing.T) {
+	// Raw -27 (0xffe5) previously decoded as 2047.4C when treated as uint16.
+	data := []byte{0xe5, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe5, 0xff}
+
+	got, err := ParseTemperature(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !approxEqual(got.TipCelsius, -0.59375) {
+		t.Errorf("TipCelsius = %v, want -0.59375", got.TipCelsius)
+	}
+	if !approxEqual(got.AmbientCelsius, -0.59375) {
+		t.Errorf("AmbientCelsius = %v, want -0.59375", got.AmbientCelsius)
+	}
+}
+
 func TestParseTemperatureRealPayload(t *testing.T) {
 	// A real 12-byte MEATER+ sample. internal raw 2009 -> 63.03C; ambient is read
 	// from data[10:12] = 0x0dda = 3546 -> (3546+8)/32 = 111.06C.
