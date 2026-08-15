@@ -46,7 +46,7 @@ func (r Reading) AmbientFahrenheit() float64 { return celsiusToFahrenheit(r.Ambi
 
 // ParseTemperature decodes the raw bytes from the temperature characteristic.
 //
-// The payload is a little-endian sequence of uint16 sensor values. This 12-byte
+// The payload is a little-endian sequence of int16 sensor values. This 12-byte
 // "resolution 32" (v2) MEATER+ firmware reports several full per-sensor
 // temperatures rather than the small offsets assumed by the documented 8-byte
 // decoding, so every channel converts with the same /32 scale.
@@ -66,23 +66,23 @@ func ParseTemperature(data []byte) (Reading, error) {
 		return Reading{}, fmt.Errorf("meater: temperature payload too short: got %d bytes, want >= 4", len(data))
 	}
 
-	internal := readUint16LE(data, 0)
+	internal := readInt16LE(data, 0)
 	reading := Reading{
 		TipCelsius: (float64(internal) + 8.0) / 32.0,
 	}
 
 	// The ambient sensor is reported at byte offset 10 on the 12-byte firmware.
 	if len(data) >= 12 {
-		ambient := readUint16LE(data, 10)
+		ambient := readInt16LE(data, 10)
 		reading.AmbientCelsius = (float64(ambient) + 8.0) / 32.0
 	}
 
 	return reading, nil
 }
 
-// readUint16LE reads a little-endian uint16 at the given byte offset.
-func readUint16LE(b []byte, offset int) int {
-	return int(b[offset]) | int(b[offset+1])<<8
+// readInt16LE reads a little-endian int16 at the given byte offset.
+func readInt16LE(b []byte, offset int) int {
+	return int(int16(uint16(b[offset]) | uint16(b[offset+1])<<8))
 }
 
 func celsiusToFahrenheit(c float64) float64 {
