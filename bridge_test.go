@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/awlx/meater-golang/internal/monitor"
+	"github.com/grandcat/zeroconf"
 )
 
 // shortenBridgeTimings makes the link watchdog fire in milliseconds instead of
@@ -154,6 +155,46 @@ func TestDecodeBridgeTempRejectsBadInput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if _, err := decodeBridgeTemp(tt.payload); err == nil {
 				t.Errorf("decodeBridgeTemp(%q) = nil error, want error", tt.payload)
+			}
+		})
+	}
+}
+
+func TestBridgeServiceEndpoint(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry *zeroconf.ServiceEntry
+		want  string
+		ok    bool
+	}{
+		{
+			name: "prefers IPv4",
+			entry: &zeroconf.ServiceEntry{Port: 9000,
+				AddrIPv4: []net.IP{net.ParseIP("192.0.2.10")},
+				AddrIPv6: []net.IP{net.ParseIP("2001:db8::10")}},
+			want: "192.0.2.10:9000",
+			ok:   true,
+		},
+		{
+			name:  "uses global IPv6",
+			entry: &zeroconf.ServiceEntry{Port: 9000, AddrIPv6: []net.IP{net.ParseIP("2001:db8::10")}},
+			want:  "[2001:db8::10]:9000",
+			ok:    true,
+		},
+		{
+			name:  "rejects link-local IPv6 without zone",
+			entry: &zeroconf.ServiceEntry{Port: 9000, AddrIPv6: []net.IP{net.ParseIP("fe80::10")}},
+		},
+		{name: "rejects missing address", entry: &zeroconf.ServiceEntry{Port: 9000}},
+		{name: "rejects invalid port", entry: &zeroconf.ServiceEntry{Port: 70000, AddrIPv4: []net.IP{net.ParseIP("192.0.2.10")}}},
+		{name: "rejects nil entry"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := bridgeServiceEndpoint(tt.entry)
+			if got != tt.want || ok != tt.ok {
+				t.Fatalf("bridgeServiceEndpoint() = %q, %v; want %q, %v", got, ok, tt.want, tt.ok)
 			}
 		})
 	}
