@@ -31,8 +31,15 @@ Firmware, wiring and troubleshooting: **[`firmware/`](../firmware/)**.
 cd firmware && pio run -t upload                  # PoE/Ethernet board (default env)
 cd firmware && pio run -e esp32-wifi -t upload    # or: generic dev board over WiFi
 cd .. && go build -tags nobluetooth -o meater .
-./meater -bridge 192.168.1.42:9000                # IP printed in the board's serial log
+./meater -bridge auto                             # discover the board over mDNS
 ```
+
+Automatic discovery is the default bridge setup. The firmware advertises
+`_meater-bridge._tcp.local.` whenever it has a network
+connection. Discovery runs again after a failed connection, so DHCP address
+changes and bridge reboots do not require reconfiguring the host. You can still
+use an explicit address, such as `-bridge bridge-host.example:9000`, when multicast DNS
+is unavailable or the host and bridge are on different network segments.
 
 The bridge is a peer of the local BLE source, not a replacement: `Start` dials
 the board, `Stop` hangs up, and everything downstream (decoding, history, ETA,

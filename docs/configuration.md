@@ -18,7 +18,7 @@
 | `-tls-key`          | (none)       | Path to a TLS private key file (use with `-tls-cert`).                           |
 | `-target`           | `63`         | Default target tip temperature in Celsius.                                       |
 | `-mock`             | `false`      | Simulate a probe instead of using Bluetooth (for UI testing).                    |
-| `-bridge`           | (none)       | Read the probe from a networked ESP32 BLE bridge at `host:port` instead of a local adapter. See [remote-bridge.md](remote-bridge.md). |
+| `-bridge`           | (none)       | Read from an ESP32 BLE bridge; use the recommended `auto` value for mDNS discovery, or pass `host:port`. See [remote-bridge.md](remote-bridge.md). |
 | `-db`               | `meater.db`  | SQLite file for cook history (empty string disables persistence).                |
 | `-cook-idle`        | `30m`        | Finish the current cook after this long without a reading (covers BLE drops/reconnects). |
 

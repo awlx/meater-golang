@@ -46,7 +46,7 @@ var (
 	mock = flag.Bool("mock", false,
 		"simulate a probe instead of using Bluetooth (for UI testing)")
 	bridgeAddr = flag.String("bridge", "",
-		"read the probe from a networked ESP32 BLE bridge at this host:port (e.g. meater-bridge.local:9000) instead of a local Bluetooth adapter")
+		"read the probe from a networked ESP32 bridge at host:port, or use 'auto' for mDNS discovery, instead of a local Bluetooth adapter")
 	dbPath = flag.String("db", "meater.db",
 		"path to the SQLite database for cook history (empty disables persistence)")
 	cookIdle = flag.Duration("cook-idle", 30*time.Minute,
@@ -87,7 +87,11 @@ func main() {
 		log.Println("running in MOCK mode (no Bluetooth)")
 		go runMock(mon)
 	case *bridgeAddr != "":
-		log.Printf("reading probe via ESP32 bridge at %s (no local Bluetooth)", *bridgeAddr)
+		if *bridgeAddr == bridgeAutoAddress {
+			log.Println("reading probe via mDNS-discovered ESP32 bridge (no local Bluetooth)")
+		} else {
+			log.Printf("reading probe via ESP32 bridge at %s (no local Bluetooth)", *bridgeAddr)
+		}
 		go runBridge(mon)
 	default:
 		go runBLE(mon)

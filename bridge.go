@@ -13,16 +13,19 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/awlx/meater-golang/internal/meater"
 	"github.com/awlx/meater-golang/internal/monitor"
+	"github.com/grandcat/zeroconf"
 )
 
 // Bridge wire protocol (one ASCII line per message, \n terminated):
@@ -39,6 +42,9 @@ import (
 const (
 	bridgeTempPrefix   = "T "
 	bridgeStatusPrefix = "S "
+	bridgeAutoAddress  = "auto"
+	bridgeMDNSService  = "_meater-bridge._tcp"
+	bridgeMDNSDomain   = "local."
 )
 
 // Link timings. Vars rather than consts so tests can shorten them; nothing
@@ -66,6 +72,10 @@ var (
 	// bridgeDialTimeout bounds a single dial so a black-holed IP (unplugged
 	// PoE, wrong address) fails fast enough to log and retry.
 	bridgeDialTimeout = 10 * time.Second
+
+	// Discovery runs again before every dial so DHCP address changes are picked
+	// up without restarting this program.
+	bridgeDiscoveryTimeout = 5 * time.Second
 )
 
 // runBridge keeps a MEATER probe streaming through a remote ESP32 bridge,
@@ -95,8 +105,6 @@ func runBridge(mon *monitor.Monitor) {
 // dialBridge repeatedly dials the bridge until it answers or stop is closed.
 // ok is false when the user pressed Stop before a connection was established.
 func dialBridge(stop <-chan struct{}) (net.Conn, bool) {
-	log.Printf("connecting to ESP32 bridge at %s...", *bridgeAddr)
-
 	for attempt := 1; ; attempt++ {
 		select {
 		case <-stop:
@@ -104,19 +112,101 @@ func dialBridge(stop <-chan struct{}) (net.Conn, bool) {
 		default:
 		}
 
-		conn, err := net.DialTimeout("tcp", *bridgeAddr, bridgeDialTimeout)
+		address := *bridgeAddr
+		if address == bridgeAutoAddress {
+			var ok bool
+			address, ok = discoverBridge(stop)
+			if !ok {
+				return nil, false
+			}
+			if address == "" {
+				log.Printf("bridge discovery attempt %d found no service", attempt)
+				if !waitForBridgeRetry(stop) {
+					return nil, false
+				}
+				continue
+			}
+		}
+
+		log.Printf("connecting to ESP32 bridge at %s...", address)
+		conn, err := net.DialTimeout("tcp", address, bridgeDialTimeout)
 		if err == nil {
 			log.Printf("bridge connected (%s)", conn.RemoteAddr())
 			return conn, true
 		}
 		log.Printf("bridge dial attempt %d failed: %v", attempt, err)
 
-		select {
-		case <-stop:
+		if !waitForBridgeRetry(stop) {
 			return nil, false
-		case <-time.After(bridgeRedialDelay):
 		}
 	}
+}
+
+func waitForBridgeRetry(stop <-chan struct{}) bool {
+	select {
+	case <-stop:
+		return false
+	case <-time.After(bridgeRedialDelay):
+		return true
+	}
+}
+
+// discoverBridge browses for the service advertised by the ESP32 firmware.
+// ok is false only when Stop interrupted discovery; an empty address with ok
+// true means the browse timed out or could not start and should be retried.
+func discoverBridge(stop <-chan struct{}) (address string, ok bool) {
+	resolver, err := zeroconf.NewResolver()
+	if err != nil {
+		log.Printf("bridge discovery unavailable: %v", err)
+		return "", true
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), bridgeDiscoveryTimeout)
+	defer cancel()
+	go func() {
+		select {
+		case <-stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	entries := make(chan *zeroconf.ServiceEntry, 1)
+	if err := resolver.Browse(ctx, bridgeMDNSService, bridgeMDNSDomain, entries); err != nil {
+		log.Printf("bridge discovery failed: %v", err)
+		return "", true
+	}
+	log.Printf("discovering ESP32 bridge via mDNS service %s...", bridgeMDNSService)
+
+	for {
+		select {
+		case <-stop:
+			return "", false
+		case <-ctx.Done():
+			return "", true
+		case entry := <-entries:
+			if endpoint, valid := bridgeServiceEndpoint(entry); valid {
+				log.Printf("discovered ESP32 bridge %q at %s", entry.Instance, endpoint)
+				return endpoint, true
+			}
+		}
+	}
+}
+
+func bridgeServiceEndpoint(entry *zeroconf.ServiceEntry) (string, bool) {
+	if entry == nil || entry.Port < 1 || entry.Port > 65535 {
+		return "", false
+	}
+	port := strconv.Itoa(entry.Port)
+	if len(entry.AddrIPv4) > 0 {
+		return net.JoinHostPort(entry.AddrIPv4[0].String(), port), true
+	}
+	for _, ip := range entry.AddrIPv6 {
+		if !ip.IsLinkLocalUnicast() {
+			return net.JoinHostPort(ip.String(), port), true
+		}
+	}
+	return "", false
 }
 
 // streamBridge reads the bridge's line protocol and feeds the monitor until the

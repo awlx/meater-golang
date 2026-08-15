@@ -27,6 +27,7 @@
 // only while a client is attached: no client, no radio traffic.
 
 #include <Arduino.h>
+#include <ESPmDNS.h>
 #include <WiFi.h>  // WiFiServer/WiFiClient: shared TCP/IP stack for both transports
 #include <NimBLEDevice.h>
 
@@ -62,6 +63,27 @@ static WiFiServer server(kListenPort);
 static NimBLEClient *probeClient = nullptr;
 static volatile bool probeConnected = false;
 static bool linkConnected = false;  // Ethernet or WiFi has an IP address
+static bool mdnsStarted = false;
+
+static void startMDNS() {
+    if (mdnsStarted) {
+        MDNS.end();
+    }
+    mdnsStarted = MDNS.begin("meater-bridge");
+    if (!mdnsStarted) {
+        Serial.println("mDNS: failed to register meater-bridge.local");
+        return;
+    }
+    MDNS.addService("meater-bridge", "tcp", kListenPort);
+    Serial.printf("mDNS: advertising _meater-bridge._tcp on port %u\n", kListenPort);
+}
+
+static void stopMDNS() {
+    if (mdnsStarted) {
+        MDNS.end();
+        mdnsStarted = false;
+    }
+}
 
 // onNotify runs on the NimBLE task: copy and post, never block or print.
 static void onNotify(NimBLERemoteCharacteristic *chr, uint8_t *data, size_t len, bool isNotify) {
@@ -109,10 +131,12 @@ static void onWifiEvent(WiFiEvent_t event) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
         Serial.printf("wifi up: %s (RSSI %ddBm)\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
         linkConnected = true;
+        startMDNS();
         break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
         Serial.println("wifi: disconnected (out of range or AP restarted); reconnecting...");
         linkConnected = false;
+        stopMDNS();
         break;
     default:
         break;
@@ -135,14 +159,17 @@ static void onEthEvent(WiFiEvent_t event) {
         Serial.printf("ethernet up: %s (%uMbps, %s)\n", ETH.localIP().toString().c_str(),
                       ETH.linkSpeed(), ETH.fullDuplex() ? "full duplex" : "half duplex");
         linkConnected = true;
+        startMDNS();
         break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
         Serial.println("ethernet: link down (cable unplugged?)");
         linkConnected = false;
+        stopMDNS();
         break;
     case ARDUINO_EVENT_ETH_STOP:
         Serial.println("ethernet: stopped");
         linkConnected = false;
+        stopMDNS();
         break;
     default:
         break;

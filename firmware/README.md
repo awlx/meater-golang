@@ -146,8 +146,13 @@ board/transport you used:
 
 ```sh
 go build -tags nobluetooth -o meater .
-./meater -bridge 192.168.1.42:9000
+./meater -bridge auto
 ```
+
+The board advertises `_meater-bridge._tcp.local.` over mDNS while its network
+link is up. The Go client rediscovers it after connection failures, so its DHCP
+address can change. If multicast DNS cannot cross your network boundary, pass
+an explicit hostname instead: `-bridge bridge-host.example:9000`.
 
 ### Why `-tags nobluetooth`
 
