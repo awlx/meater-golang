@@ -14,6 +14,46 @@ temperature chart, doneness targets, ETA, and browser alerts.
 
 More screenshots: [Grafana dashboards](docs/grafana/) · [Home Assistant](docs/home-assistant.md)
 
+## Quick start: Home Assistant + ESP32
+
+1. **Flash a Wi-Fi ESP32** (requires [PlatformIO](https://platformio.org/)):
+
+  ```sh
+  cd firmware
+  pio run -e esp32-wifi -t upload
+  ```
+
+2. **Connect the bridge to Wi-Fi.** Join the `meater-bridge-setup` network that
+  appears after first boot and choose your home Wi-Fi in the setup page.
+
+3. **Run the monitor.** If Home Assistant runs in Docker on Linux, start this
+   container beside it:
+
+   ```sh
+   docker run -d \
+     --name meater \
+     --restart unless-stopped \
+     --network host \
+     -v meater-data:/data \
+     ghcr.io/awlx/meater:latest \
+     -http :8088 -db /data/meater.db -bridge auto
+   ```
+
+   `--network host` lets mDNS find the ESP32 automatically. **Home Assistant
+   OS cannot run arbitrary Docker containers**, so run this command on another
+   always-on Linux/Docker computer on the same network instead.
+
+4. **Add it to Home Assistant.** In HACS, add this repository as an
+  **Integration**, install **MEATER Monitor (self-hosted)**, restart Home
+  Assistant, then add the integration and enter the monitor computer's
+  hostname and port `8088`.
+
+Take the probe out of its charger and start the cook from the Home Assistant
+`Cook session` switch. See the [ESP32 guide](docs/remote-bridge.md),
+[installation guide](docs/install.md), and
+[Home Assistant guide](docs/home-assistant.md) for persistent service setup and
+troubleshooting.
+
 ## Highlights
 
 - **Everything stays on your network — no MEATER account, no cloud, ever.**
