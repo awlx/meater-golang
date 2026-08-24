@@ -47,6 +47,29 @@ alerts) is identical. The board forwards the probe's **raw** payload, so
 `internal/meater.ParseTemperature` remains the only decoder in the project and
 the two transports cannot drift apart.
 
+## Link visibility
+
+A bridge setup has two links that can fail independently — this program's TCP
+connection to the board, and the board's BLE connection to the probe — so the
+status API, dashboard, Prometheus metrics, and Home Assistant entities all
+report them separately rather than folding them into one "connected" flag:
+
+- **Bridge link** (`bridgeConnected` / `meater_bridge_connected` /
+  `binary_sensor.*_bridge_connected`): whether this program currently has a
+  live socket open to the ESP32. Down means the board is unreachable — off,
+  rebooting, or a network problem — and the dashboard shows **bridge offline**.
+- **Probe link** (`connected` / `meater_probe_connected` /
+  `binary_sensor.*_probe_connected`): whether the board's own BLE link to the
+  probe is up, exactly as for a local Bluetooth setup. The bridge can be fully
+  reachable while this is down — the probe is simply out of range or asleep —
+  which the dashboard shows as **searching…**.
+- **Probe signal** (`probeRssiDbm` / `meater_probe_rssi_dbm` /
+  `sensor.*_bridge_signal_strength`): the probe's BLE RSSI as measured by the
+  board, reported once on connect and every few seconds afterwards. Useful for
+  siting the board — a consistently weak reading (below roughly -85 dBm) means
+  it's worth moving the board closer to the grill before a real cook depends on
+  it.
+
 > **Note:** the ESP32 cannot run this program itself — it is a microcontroller
 > with no OS, and `modernc.org/sqlite`, BlueZ/D-Bus and `net/http` all need a
 > POSIX host. It is the radio, not the computer.

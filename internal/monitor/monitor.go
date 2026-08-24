@@ -77,6 +77,10 @@ type sample struct {
 // the API and the web UI.
 type Status struct {
 	Connected         bool      `json:"connected"`
+	UsingBridge       bool      `json:"usingBridge"`     // reading the probe through an ESP32 bridge, not local BLE
+	BridgeConnected   bool      `json:"bridgeConnected"` // TCP link to the bridge is up (bridge mode only)
+	ProbeRSSI         int       `json:"probeRssiDbm"`    // signal strength of the probe's BLE link, as reported by the bridge
+	HasProbeRSSI      bool      `json:"hasProbeRssi"`    // false until the bridge has reported an RSSI reading
 	TipCelsius        float64   `json:"tipCelsius"`
 	TipFahrenheit     float64   `json:"tipFahrenheit"`
 	AmbientCelsius    float64   `json:"ambientCelsius"`
@@ -120,6 +124,16 @@ type Monitor struct {
 	hasRead   bool
 	connected bool
 	target    float64 // Celsius
+
+	// Bridge-specific link state. usingBridge is set once at startup by the
+	// transport that owns the connection (see SetUsingBridge); the rest track
+	// the ESP32 bridge itself, distinct from connected above (which reports the
+	// *probe's* BLE link, as relayed by the bridge over an already-open TCP
+	// socket).
+	usingBridge     bool
+	bridgeConnected bool
+	rssi            int
+	hasRSSI         bool
 	updatedAt time.Time
 	subs      map[chan Status]struct{}
 
@@ -207,6 +221,8 @@ func (m *Monitor) Stop() {
 	close(m.stopCh)
 	m.connected = false
 	m.hasRead = false
+	m.bridgeConnected = false
+	m.hasRSSI = false
 	oldID := m.cookID
 	m.cookID = 0
 	st := m.st
@@ -315,7 +331,48 @@ func (m *Monitor) SetConnected(connected bool) {
 	m.connected = connected
 	if !connected {
 		m.hasRead = false
+		m.hasRSSI = false
 	}
+	status := m.statusLocked()
+	m.mu.Unlock()
+	m.broadcast(status)
+}
+
+// SetUsingBridge records whether the probe is being read through a networked
+// ESP32 bridge rather than a local Bluetooth adapter. It is set once at
+// startup by whichever transport is selected, and lets clients (the web UI,
+// Prometheus, Home Assistant) know whether BridgeConnected/ProbeRSSI below are
+// meaningful.
+func (m *Monitor) SetUsingBridge(usingBridge bool) {
+	m.mu.Lock()
+	m.usingBridge = usingBridge
+	status := m.statusLocked()
+	m.mu.Unlock()
+	m.broadcast(status)
+}
+
+// SetBridgeConnected records whether the TCP link to the ESP32 bridge itself
+// is up. This is distinct from SetConnected: the bridge can be dialed and
+// streaming keepalives while it is still scanning for the probe, so "the
+// bridge is reachable" and "the probe is attached" are different facts and
+// must not be conflated into one flag.
+func (m *Monitor) SetBridgeConnected(connected bool) {
+	m.mu.Lock()
+	m.bridgeConnected = connected
+	if !connected {
+		m.hasRSSI = false
+	}
+	status := m.statusLocked()
+	m.mu.Unlock()
+	m.broadcast(status)
+}
+
+// SetProbeRSSI records the signal strength of the probe's BLE link, as
+// reported by the ESP32 bridge.
+func (m *Monitor) SetProbeRSSI(dbm int) {
+	m.mu.Lock()
+	m.rssi = dbm
+	m.hasRSSI = true
 	status := m.statusLocked()
 	m.mu.Unlock()
 	m.broadcast(status)
@@ -567,6 +624,10 @@ func (m *Monitor) broadcast(s Status) {
 func (m *Monitor) statusLocked() Status {
 	s := Status{
 		Connected:        m.connected,
+		UsingBridge:      m.usingBridge,
+		BridgeConnected:  m.bridgeConnected,
+		ProbeRSSI:        m.rssi,
+		HasProbeRSSI:     m.hasRSSI,
 		HasReading:       m.hasRead,
 		Running:          m.running,
 		TargetCelsius:    round1(m.target),

@@ -67,6 +67,15 @@ function fmtTemp(v) {
 	return Math.round(v * 10) / 10;
 }
 
+// rssiClass buckets BLE signal strength into the same three-tier language as
+// a phone's signal bars: comfortably solid, marginal but working, or weak
+// enough that a dropout is more a matter of when than if.
+function rssiClass(dbm) {
+	if (dbm >= -70) return 'pill-on';
+	if (dbm >= -90) return 'pill-warn';
+	return 'pill-off';
+}
+
 // fmtRate keeps two decimals so slow cooking rates (e.g. a stall at
 // ~0.04 °/min) stay visible instead of rounding to zero.
 function fmtRate(v) {
@@ -129,9 +138,25 @@ function render(status) {
 	} else if (status.connected) {
 		pill.className = 'pill pill-on';
 		txt.textContent = 'connected';
+	} else if (status.usingBridge && !status.bridgeConnected) {
+		// The probe link (status.connected) is necessarily down too, but this is
+		// a different problem: the bridge itself is unreachable, not just quiet.
+		pill.className = 'pill pill-off';
+		txt.textContent = 'bridge offline';
 	} else {
 		pill.className = 'pill pill-off';
 		txt.textContent = 'searching…';
+	}
+
+	// Bridge probe-signal pill (RSSI at the ESP32, bridge mode only).
+	const rssiPill = el('rssi-pill');
+	const rssiTxt = el('rssi-text');
+	if (status.usingBridge && status.hasProbeRssi) {
+		rssiPill.classList.remove('hidden');
+		rssiPill.className = `pill ${rssiClass(status.probeRssiDbm)}`;
+		rssiTxt.textContent = `${status.probeRssiDbm} dBm`;
+	} else {
+		rssiPill.classList.add('hidden');
 	}
 
 	// Temperatures.

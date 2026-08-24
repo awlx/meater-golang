@@ -25,6 +25,14 @@ class MeaterBinarySensorDescription(BinarySensorEntityDescription):
     """Describes a MEATER binary sensor."""
 
     value_fn: Callable[[dict[str, Any]], bool]
+    available_fn: Callable[[dict[str, Any]], bool] | None = None
+    """Whether the entity is meaningful for the current setup.
+
+    Used for fields that only exist for one transport, such as the ESP32
+    bridge's own link -- a local-Bluetooth setup should show this entity as
+    unavailable rather than a permanently-off connectivity sensor, which would
+    read as a fault.
+    """
 
 
 BINARY_SENSORS: tuple[MeaterBinarySensorDescription, ...] = (
@@ -53,6 +61,14 @@ BINARY_SENSORS: tuple[MeaterBinarySensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
         value_fn=lambda s: s.get("state") == STATE_STALLED,
+    ),
+    MeaterBinarySensorDescription(
+        key="bridge_connected",
+        translation_key="bridge_connected",
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda s: bool(s.get("bridgeConnected")),
+        available_fn=lambda s: bool(s.get("usingBridge")),
     ),
 )
 
@@ -85,3 +101,11 @@ class MeaterBinarySensor(MeaterEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return the binary sensor state."""
         return self.entity_description.value_fn(self.status)
+
+    @property
+    def available(self) -> bool:
+        """Return False for entities not meaningful under the current transport."""
+        if not super().available:
+            return False
+        available_fn = self.entity_description.available_fn
+        return available_fn(self.status) if available_fn else True

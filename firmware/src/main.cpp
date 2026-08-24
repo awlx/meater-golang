@@ -21,10 +21,15 @@
 //   T <hex>          raw temperature characteristic payload, hex encoded
 //   S connected      GATT link to the probe is live
 //   S disconnected   probe lost; we keep rescanning
+//   R <dBm>          signed RSSI of the probe's BLE link, sent on connect and
+//                    every kRssiIntervalMs thereafter while connected
 //   # <text>         banner/log, ignored by the client
 //
 // The Go side dials us on Start and hangs up on Stop, so we scan for the probe
-// only while a client is attached: no client, no radio traffic.
+// only while a client is attached: no client, no radio traffic. The TCP link
+// itself (this program reaching the board at all) is a separate concern from
+// the "S"/"R" lines above, which describe the *probe's* BLE link -- the Go
+// client already knows its own socket state without our help.
 
 #include <Arduino.h>
 #include <ESPmDNS.h>
@@ -45,6 +50,11 @@ static constexpr char kTemperatureCharUUID[] = "7edda774-045e-4bbf-909b-45d1991a
 static constexpr uint16_t kListenPort = 9000;
 static constexpr uint32_t kScanDurationMs = 10000;
 
+// How often to report the probe's BLE RSSI while connected. Signal strength
+// drifts slowly (the grill lid opens, someone walks past), so there is no need
+// to poll it anywhere near as often as temperature notifications arrive.
+static constexpr uint32_t kRssiIntervalMs = 3000;
+
 // The probe's payload is 12 bytes today; allow headroom for future firmware
 // without risking a stack blowout in the notify callback.
 static constexpr size_t kMaxPayload = 32;
@@ -62,6 +72,7 @@ static QueueHandle_t payloadQueue = nullptr;
 static WiFiServer server(kListenPort);
 static NimBLEClient *probeClient = nullptr;
 static volatile bool probeConnected = false;
+static uint32_t lastRssiSentAt = 0; // 0 means "never sent since connecting"
 static bool linkConnected = false;  // Ethernet or WiFi has an IP address
 static bool mdnsStarted = false;
 
@@ -335,6 +346,13 @@ void loop() {
         if (probeConnected && reported != 1) {
             client.print("S connected\n");
             reported = 1;
+            lastRssiSentAt = 0; // report signal strength immediately on connect
+        }
+
+        if (probeConnected &&
+            (lastRssiSentAt == 0 || millis() - lastRssiSentAt > kRssiIntervalMs)) {
+            client.printf("R %d\n", probeClient->getRssi());
+            lastRssiSentAt = millis();
         }
 
         Payload p;

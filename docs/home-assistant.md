@@ -42,11 +42,18 @@ just falls back to the generic placeholder — everything else still works.
 | `binary_sensor.*_ready`         | On when the tip reaches the target — the one to automate on.   |
 | `binary_sensor.*_cook_session`  | On while discovery is running.                                |
 | `binary_sensor.*_probe_connected` | BLE link health.                                             |
+| `binary_sensor.*_bridge_connected` | TCP link to the ESP32 bridge itself — [`-bridge`](remote-bridge.md) setups only, `unavailable` on a local-Bluetooth install. |
+| `sensor.*_bridge_signal_strength` | Probe's BLE signal (RSSI, dBm) as seen by the ESP32 bridge — bridge setups only. |
 | `number.*_target_temperature`   | Set the target from Home Assistant.                           |
 | `switch.*_cook_session`         | Start/stop a session. Starting always opens a **new** cook.   |
 
 The estimate's low/high bounds, its source, the cook ID, and a stalled-problem
 sensor are also available as diagnostic entities, disabled by default.
+
+`binary_sensor.*_bridge_connected` and `sensor.*_bridge_signal_strength` report
+`unavailable` rather than a misleading `off`/`0 dBm` when the monitor is reading
+the probe over local Bluetooth instead of a bridge — check `binary_sensor.*_probe_connected`
+for BLE link health in that case.
 
 An example "shout when the brisket is done" automation:
 
