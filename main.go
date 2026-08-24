@@ -92,6 +92,7 @@ func main() {
 		} else {
 			log.Printf("reading probe via ESP32 bridge at %s (no local Bluetooth)", *bridgeAddr)
 		}
+		mon.SetUsingBridge(true)
 		go runBridge(mon)
 	default:
 		go runBLE(mon)

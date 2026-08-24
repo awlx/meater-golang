@@ -160,6 +160,39 @@ func TestDecodeBridgeTempRejectsBadInput(t *testing.T) {
 	}
 }
 
+// The bridge reports the probe's BLE signal strength on its own "R" line,
+// separate from the "T"/"S" lines exercised above. This pins the parsing and
+// its wiring into the monitor. The board closes the pipe once it has said its
+// piece, which is what makes streamBridge return on its own below.
+func TestStreamBridgeParsesRSSI(t *testing.T) {
+	client, board := net.Pipe()
+	defer client.Close()
+
+	go func() {
+		defer board.Close()
+		fmt.Fprint(board, "S connected\n")
+		fmt.Fprint(board, "R -55\n")
+	}()
+
+	mon := monitor.New(63)
+	done := make(chan bool, 1)
+	go func() { done <- streamBridge(client, mon, make(chan struct{})) }()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("streamBridge never returned")
+	}
+
+	s := mon.Status()
+	if !s.HasProbeRSSI {
+		t.Fatal("HasProbeRSSI = false, want true after an R line")
+	}
+	if s.ProbeRSSI != -55 {
+		t.Errorf("ProbeRSSI = %d, want -55", s.ProbeRSSI)
+	}
+}
+
 func TestBridgeServiceEndpoint(t *testing.T) {
 	tests := []struct {
 		name  string

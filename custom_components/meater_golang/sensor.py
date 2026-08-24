@@ -15,6 +15,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import (
     PERCENTAGE,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     EntityCategory,
     UnitOfTemperature,
     UnitOfTime,
@@ -42,6 +43,10 @@ class MeaterSensorDescription(SensorEntityDescription):
     """Describes a MEATER sensor."""
 
     value_fn: Callable[[dict[str, Any]], Any]
+    available_fn: Callable[[dict[str, Any]], bool] | None = None
+    """Whether the entity is meaningful for the current setup (e.g. bridge-only
+    fields on a local-Bluetooth install). See binary_sensor.py's version of the
+    same field for the full rationale."""
 
 
 SENSORS: tuple[MeaterSensorDescription, ...] = (
@@ -180,6 +185,16 @@ SENSORS: tuple[MeaterSensorDescription, ...] = (
         entity_registry_enabled_default=False,
         value_fn=lambda s: optional_datetime(s.get("updatedAt")),
     ),
+    MeaterSensorDescription(
+        key="probe_rssi",
+        translation_key="probe_rssi",
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda s: s.get("probeRssiDbm") if s.get("hasProbeRssi") else None,
+        available_fn=lambda s: bool(s.get("usingBridge")),
+    ),
 )
 
 
@@ -213,6 +228,14 @@ class MeaterSensor(MeaterEntity, SensorEntity):
     def native_value(self) -> Any:
         """Return the sensor value."""
         return self.entity_description.value_fn(self.status)
+
+    @property
+    def available(self) -> bool:
+        """Return False for entities not meaningful under the current transport."""
+        if not super().available:
+            return False
+        available_fn = self.entity_description.available_fn
+        return available_fn(self.status) if available_fn else True
 
 
 class MeaterReadyAtSensor(MeaterEntity, SensorEntity):

@@ -72,6 +72,9 @@ type Collector struct {
 	up           *prometheus.Desc
 	buildInfo    *prometheus.Desc
 	connected    *prometheus.Desc
+	bridgeUp     *prometheus.Desc
+	bridgeLink   *prometheus.Desc
+	probeRSSI    *prometheus.Desc
 	running      *prometheus.Desc
 	hasReading   *prometheus.Desc
 	state        *prometheus.Desc
@@ -127,6 +130,12 @@ func NewCollector(mon *monitor.Monitor, st *store.Store) *Collector {
 
 		connected: d("meater_probe_connected",
 			"1 when the BLE link to the probe is up, 0 otherwise."),
+		bridgeUp: d("meater_bridge_enabled",
+			"1 when the probe is read through a networked ESP32 bridge rather than local Bluetooth, 0 otherwise."),
+		bridgeLink: d("meater_bridge_connected",
+			"1 when the TCP link to the ESP32 bridge is up, 0 otherwise; always 0 when meater_bridge_enabled is 0."),
+		probeRSSI: d("meater_probe_rssi_dbm",
+			"Signal strength of the probe's BLE link, as reported by the ESP32 bridge, in dBm; NaN when unknown or not using a bridge."),
 		running: d("meater_discovery_running",
 			"1 when probe discovery is active (a cook session has been started), 0 when stopped."),
 		hasReading: d("meater_probe_has_reading",
@@ -211,7 +220,7 @@ func NewCollector(mon *monitor.Monitor, st *store.Store) *Collector {
 // Describe implements prometheus.Collector.
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	for _, desc := range []*prometheus.Desc{
-		c.up, c.buildInfo, c.connected, c.running, c.hasReading, c.state,
+		c.up, c.buildInfo, c.connected, c.bridgeUp, c.bridgeLink, c.probeRSSI, c.running, c.hasReading, c.state,
 		c.tipC, c.tipF, c.ambientC, c.ambientF, c.ambientAvgC, c.targetC, c.targetF,
 		c.rate, c.etaSeconds, c.etaLow, c.etaHigh, c.etaSamples, c.etaSource,
 		c.readyAt, c.progress, c.remainingC,
@@ -238,6 +247,13 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	gauge(c.buildInfo, 1, version(), goVersion())
 
 	gauge(c.connected, b2f(s.Connected))
+	gauge(c.bridgeUp, b2f(s.UsingBridge))
+	gauge(c.bridgeLink, b2f(s.BridgeConnected))
+	rssi := math.NaN()
+	if s.HasProbeRSSI {
+		rssi = float64(s.ProbeRSSI)
+	}
+	gauge(c.probeRSSI, rssi)
 	gauge(c.running, b2f(s.Running))
 	gauge(c.hasReading, b2f(s.HasReading))
 	for _, st := range allStates {

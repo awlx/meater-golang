@@ -55,6 +55,7 @@
       "eta_samples": { "name": "Estimate history samples" },
       "cook_id": { "name": "Cook ID" },
       "last_update": { "name": "Last update" },
+      "probe_rssi": { "name": "Bridge signal strength" },
       "state": {
         "name": "Cook state",
         "state": {
@@ -80,7 +81,8 @@
       "ready": { "name": "Ready" },
       "cooking": { "name": "Cook session" },
       "probe_connected": { "name": "Probe connected" },
-      "stalled": { "name": "Stalled" }
+      "stalled": { "name": "Stalled" },
+      "bridge_connected": { "name": "Bridge connected" }
     },
     "number": {
       "target": { "name": "Target temperature" }

@@ -66,6 +66,7 @@ ASCII, one `\n`-terminated line per message, port 9000:
 | `T <hex>` | raw temperature payload, hex encoded |
 | `S connected` | GATT link to the probe is live |
 | `S disconnected` | probe not connected; the bridge keeps rescanning |
+| `R <dBm>` | probe's BLE RSSI, sent on connect and every ~3s thereafter |
 | `# <text>` | banner / scan keepalive — content ignored, but see below |
 
 Debuggable with `nc <board-ip> 9000`.

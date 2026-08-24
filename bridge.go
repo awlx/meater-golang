@@ -33,15 +33,22 @@ import (
 //	T <hex>          raw temperature characteristic payload, hex encoded
 //	S connected      the bridge has a live GATT link to the probe
 //	S disconnected   the bridge lost the probe (it keeps rescanning)
+//	R <dBm>          signed RSSI of the probe's BLE link, sent on connect and
+//	                 periodically thereafter while connected
 //	# <text>         human-readable banner/log, ignored
 //
 // This program is the TCP *client*: it dials the bridge when the user presses
 // Start and hangs up on Stop. The firmware scans for the probe only while a
 // client is attached, which maps the existing Start/Stop contract onto the
 // remote radio without any extra control channel.
+//
+// "S"/"R" describe the *probe's* BLE link to the bridge, not our own TCP link
+// to the bridge itself -- that one we track directly (see SetBridgeConnected
+// below), since we're the ones dialing it.
 const (
 	bridgeTempPrefix   = "T "
 	bridgeStatusPrefix = "S "
+	bridgeRSSIPrefix   = "R "
 	bridgeAutoAddress  = "auto"
 	bridgeMDNSService  = "_meater-bridge._tcp"
 	bridgeMDNSDomain   = "local."
@@ -93,11 +100,13 @@ func runBridge(mon *monitor.Monitor) {
 			// Stopped before the bridge answered.
 			continue
 		}
+		mon.SetBridgeConnected(true)
 
 		if streamBridge(conn, mon, stop) {
 			log.Println("bridge stream stalled, reconnecting...")
 		}
 		_ = conn.Close()
+		mon.SetBridgeConnected(false)
 		mon.SetConnected(false)
 	}
 }
@@ -269,6 +278,14 @@ func streamBridge(conn net.Conn, mon *monitor.Monitor, stop <-chan struct{}) boo
 			default:
 				log.Printf("bridge: unknown status %q", status)
 			}
+
+		case strings.HasPrefix(line, bridgeRSSIPrefix):
+			rssi, err := strconv.Atoi(strings.TrimPrefix(line, bridgeRSSIPrefix))
+			if err != nil {
+				log.Printf("bridge: bad RSSI %q: %v", line, err)
+				continue
+			}
+			mon.SetProbeRSSI(rssi)
 
 		case line == "" || strings.HasPrefix(line, "#"):
 			// Banner or scan keepalive; its only job was to reset the watchdog.
