@@ -1,0 +1,82 @@
+# XcodeGen spec for the ProbePilot iOS app (companion for meater-golang).
+#
+# Generate the Xcode project with:
+#   brew install xcodegen   # once
+#   cd ios && xcodegen generate
+#
+# Before building on a device, set DEVELOPMENT_TEAM below (or in Xcode's
+# Signing & Capabilities tab) and, if your team can't use the default bundle
+# ids, change PRODUCT_BUNDLE_IDENTIFIER on both targets plus the app group id
+# in Shared/SharedStore.swift and both .entitlements files.
+name: ProbePilot
+options:
+  bundleIdPrefix: dev.awlx
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    # Empty unless DEVELOPMENT_TEAM is exported when running xcodegen
+    # (release.sh does this from release.env), so no team ID is ever
+    # committed. Needed in the generated project so Xcode's GUI signing
+    # can do the one-time app-group registration.
+    DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+    SWIFT_VERSION: "5.9"
+    # iPhone only.
+    TARGETED_DEVICE_FAMILY: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "1.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SUPPORTS_MACCATALYST: NO
+    SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+
+targets:
+  ProbePilot:
+    type: application
+    platform: iOS
+    sources:
+      - path: ProbePilot
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.awlx.probepilot
+        PRODUCT_NAME: ProbePilot
+        INFOPLIST_FILE: ProbePilot/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ProbePilot/ProbePilot.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+      configs:
+        # Release archives sign manually with API-minted profiles
+        # (see provision.py); Debug stays automatic for device runs.
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "ProbePilot AppStore"
+    dependencies:
+      - target: ProbePilotWidgets
+
+  ProbePilotWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ProbePilotWidgets
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.awlx.probepilot.widgets
+        PRODUCT_NAME: ProbePilotWidgets
+        INFOPLIST_FILE: ProbePilotWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ProbePilotWidgets/ProbePilotWidgets.entitlements
+        SKIP_INSTALL: YES
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "ProbePilot Widgets AppStore"
